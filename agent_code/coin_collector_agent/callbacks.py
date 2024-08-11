@@ -1,5 +1,4 @@
 from random import shuffle
-
 import numpy as np
 import settings as s
 
@@ -82,7 +81,7 @@ def act(self, game_state):
     _, score, bombs_left, (x, y) = game_state['self']
     bombs = game_state['bombs']
     bomb_xys = [xy for (xy, t) in bombs]
-    others = [xy for (n, s, b, xy) in game_state['others']]
+    others = [xy for (n, ss, b, xy) in game_state['others']]  # renamed s to ss here due to overshadowing
     coins = game_state['coins']
     bomb_map = np.ones(arena.shape) * 5
     for (xb, yb), t in bombs:

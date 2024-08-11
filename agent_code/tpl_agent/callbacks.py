@@ -10,7 +10,7 @@ ACTIONS = ['UP', 'RIGHT', 'DOWN', 'LEFT', 'WAIT', 'BOMB']
 
 def setup(self):
     """
-    Setup your code. This is called once when loading each agent.
+    Set up your code. This is called once when loading each agent.
     Make sure that you prepare everything such that act(...) can be called.
 
     When in training mode, the separate `setup_training` in train.py is called
@@ -18,9 +18,9 @@ def setup(self):
     with other students, without revealing your training code.
 
     In this example, our model is a set of probabilities over actions
-    that are is independent of the game state.
+    that are independent of the game state.
 
-    :param self: This object is passed to all callbacks and you can set arbitrary values.
+    :param self: This object is passed to all callbacks, and you can set arbitrary values.
     """
     if self.train or not os.path.isfile("my-saved-model.pt"):
         self.logger.info("Setting up model from scratch.")
