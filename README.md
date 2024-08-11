@@ -1,2 +1,3 @@
-# BombermanML
-Repository for the machine learning essentials final project of the crow of reinforcement team.
+# bomberman_rl
+Setup for a project/competition amongst students to train a winning Reinforcement Learning agent for the classic game Bomberman.
+
