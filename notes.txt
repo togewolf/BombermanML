@@ -1,3 +1,4 @@
 Notes. For example, write down libraries here that we include and might add to the docker file later.
 Play against rule-based agents:
 python main.py play --agents user_agent rule_based_agent rule_based_agent rule_based_agent --turn-based
+
