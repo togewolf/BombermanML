@@ -5,7 +5,7 @@ from typing import List
 from sklearn.ensemble import RandomForestClassifier
 
 import events as e
-from .callbacks import state_to_features
+from .callbacks import state_to_features, temp
 
 ACTIONS = ['UP', 'RIGHT', 'DOWN', 'LEFT', 'WAIT', 'BOMB']
 ACTION_MAP = {action: idx for idx, action in enumerate(ACTIONS)}
@@ -14,7 +14,7 @@ Transition = namedtuple('Transition',
                         ('state', 'action', 'next_state', 'reward'))
 
 # Hyper parameters -- DO modify
-TRANSITION_HISTORY_SIZE = 100  # keep only ... last transitions
+TRANSITION_HISTORY_SIZE = 10  # keep only ... last transitions
 RECORD_ENEMY_TRANSITIONS = 1.0  # record enemy transitions with probability ...
 
 # Our own added events:
@@ -32,8 +32,7 @@ def setup_training(self):
     # Example: Set up an array that will note transition tuples
     # (s, a, r, s')
     self.transitions = deque(maxlen=TRANSITION_HISTORY_SIZE)
-    # Initialize the random forest classifier
-    self.model = RandomForestClassifier(n_estimators=100)  # Use 100 trees in the forest
+
 
 
 def game_events_occurred(self, old_game_state: dict, self_action: str, new_game_state: dict, events: List[str]):
@@ -56,7 +55,8 @@ def game_events_occurred(self, old_game_state: dict, self_action: str, new_game_
     self.logger.debug(f'Encountered game event(s) {", ".join(map(repr, events))} in step {new_game_state["step"]}')
 
     # Idea: Add your own events to hand out rewards
-    if ...:
+    if self_action == temp:
+        events.append(MOVED_TOWARD_COIN)
         # events.append(PLACEHOLDER_EVENT)
         # TODO: add the following events and reward them:
         # ...
@@ -123,8 +123,15 @@ def reward_from_events(self, events: List[str]) -> int:
     certain behavior.
     """
     game_rewards = {
-        e.COIN_COLLECTED: 1,
+        e.COIN_COLLECTED: 5,
         e.KILLED_OPPONENT: 5,
+        e.MOVED_LEFT: -.05,
+        e.MOVED_RIGHT: -.05,
+        e.MOVED_UP: -.05,
+        e.MOVED_DOWN: -.05,
+        e.WAITED: -.1,
+        e.INVALID_ACTION: -1,
+        e.MOVED_TOWARD_COIN: 0.1
         # PLACEHOLDER_EVENT: -.1  # idea: the custom event is bad
         # TODO: complete the rewards
     }
