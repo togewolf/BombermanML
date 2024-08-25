@@ -4,7 +4,12 @@ import pickle
 from typing import List
 
 import events as e
-from .callbacks import state_to_features, events_pre
+from .dqlnn_model import state_to_features
+
+import csv  # to store scores
+
+ACTIONS = ['RIGHT', 'DOWN', 'LEFT', 'UP', 'WAIT', 'BOMB']
+ACTION_MAP = {action: idx for idx, action in enumerate(ACTIONS)}
 
 # This is only an example!
 Transition = namedtuple('Transition',
@@ -23,7 +28,7 @@ IS_IN_BOMB_EXPLOSION_RADIUS = 'IS_IN_BOMB_EXPLOSION_RADIUS'  # perhaps different
 USELESS_BOMB = 'USELESS BOMB'  # no crate or enemy reachable by bomb  # or just punish each dropped bomb and reward usefulness
 TRAPPED_SELF = 'TRAPPED_SELF'  # placed bomb in entrance of dead end with length < 4 and went into dead end -> death imminent
 MOVED_IN_BLOCKED_DIRECTION = 'MOVED_IN_BLOCKED_DIRECTION'
-
+MOVED_BACK_AND_FORTH = 'MOVED_BACK_AND_FORTH'
 
 def setup_training(self):
     """
@@ -33,10 +38,7 @@ def setup_training(self):
 
     :param self: This object is passed to all callbacks and you can set arbitrary values.
     """
-    # Example: Setup an array that will note transition tuples
-    # (s, a, r, s')
-    self.transitions = deque(maxlen=TRANSITION_HISTORY_SIZE)
-
+    pass
 
 def game_events_occurred(self, old_game_state: dict, self_action: str, new_game_state: dict, events: List[str]):
     """
@@ -59,9 +61,15 @@ def game_events_occurred(self, old_game_state: dict, self_action: str, new_game_
     if not old_game_state:
         return
 
+    old_features = state_to_features(old_game_state)
+    new_features = state_to_features(new_game_state)
+
+    if new_features[7] == 1:
+        events.append(IS_IN_BOMB_EXPLOSION_RADIUS)
+
     # Retrieve the precomputed blocked directions and nearest coin direction index from events_pre
-    blocked = events_pre[0]
-    nearest_coin_direction = events_pre[1]
+    blocked = old_features[3:7]
+    nearest_coin_direction = old_features[8:12]
 
     _, _, _, (ax, ay) = old_game_state['self']
 
@@ -72,19 +80,30 @@ def game_events_occurred(self, old_game_state: dict, self_action: str, new_game_
         'LEFT': (ax - 1, ay),
         'UP': (ax, ay - 1)
     }
-
     if self_action in action_to_direction:
         # Check if the action was in a blocked direction
-        if blocked and blocked[['RIGHT', 'DOWN', 'LEFT', 'UP'].index(self_action)]:
+        if blocked[['RIGHT', 'DOWN', 'LEFT', 'UP'].index(self_action)]:
             events.append(MOVED_IN_BLOCKED_DIRECTION)
 
         # Check if the action was toward the nearest coin
-        if nearest_coin_direction is not None and ['RIGHT', 'DOWN', 'LEFT', 'UP'][nearest_coin_direction] == self_action:
+        if nearest_coin_direction[['RIGHT', 'DOWN', 'LEFT', 'UP'].index(self_action)]:
             events.append(MOVED_TOWARD_COIN)
 
-    self.transitions.append(
-        Transition(state_to_features(old_game_state), self_action, state_to_features(new_game_state),
-                   reward_from_events(self, events)))
+    _, _, _, (ax, ay) = new_game_state['self']
+    new_position = (ax, ay)
+
+    # Update the last positions deque
+    self.last_positions.append(new_position)
+
+    # Check if the agent is moving back and forth
+    if len(self.last_positions) > 2:
+        if self.last_positions[0] == self.last_positions[2]:
+            events.append(MOVED_BACK_AND_FORTH)
+
+
+    self.model.store_transition(old_features, ACTION_MAP[self_action],
+                                reward_from_events(self, events), new_features, done=False)
+    self.model.learn()
 
 
 def end_of_round(self, last_game_state: dict, last_action: str, events: List[str]):
@@ -101,8 +120,16 @@ def end_of_round(self, last_game_state: dict, last_action: str, events: List[str
     :param self: The same object that is passed to all of your callbacks.
     """
     self.logger.debug(f'Encountered event(s) {", ".join(map(repr, events))} in final step')
-    self.transitions.append(
-        Transition(state_to_features(last_game_state), last_action, None, reward_from_events(self, events)))
+
+    self.model.store_transition(state_to_features(last_game_state), ACTION_MAP[last_action],
+                                reward_from_events(self, events), None, done=True)
+
+    # write scores to csv file
+    score = last_game_state['self'][1]
+    file_name = 'scores.csv'
+    with open(file_name, mode='a', newline='') as file:
+        writer = csv.writer(file)
+        writer.writerow([score])
 
     # Store the model
     with open("my-saved-model.pt", "wb") as file:
@@ -121,22 +148,23 @@ def reward_from_events(self, events: List[str]) -> int:
         e.MOVED_DOWN: -0.01,
         e.MOVED_LEFT: -0.01,
         e.MOVED_RIGHT: -0.01,
-        e.WAITED: -0.02,
+        e.WAITED: -0.1,
         e.COIN_COLLECTED: 5,
         e.KILLED_OPPONENT: 5,
-        e.KILLED_SELF: -7.5,
+        e.KILLED_SELF: -15,
         e.COIN_FOUND: 1,  # Crate destroyed that contains coin
-        e.GOT_KILLED: -7.5,
-        e.INVALID_ACTION: -1,
+        e.GOT_KILLED: -5,
+        e.INVALID_ACTION: -0.5,
         e.OPPONENT_ELIMINATED: 3,
         e.SURVIVED_ROUND: 7.5,
-        e.BOMB_DROPPED: -0.2,
-        MOVED_TOWARD_COIN: 0.2,  # todo: get those from features (features of old game state)
+        e.BOMB_DROPPED: -0.5,
+        MOVED_TOWARD_COIN: 0.2,
         # MOVED_TOWARD_CRATE: 0.1,
-        MOVED_IN_BLOCKED_DIRECTION: -1,
-        # DROPPED_BOMB_THAT_CAN_DESTROY_CRATE: 0.2,  # 0.2 per crate that the bomb can reach  # todo here
+        MOVED_IN_BLOCKED_DIRECTION: -0.5,
+        # DROPPED_BOMB_THAT_CAN_DESTROY_CRATE: 0.2,  # reward per crate that the bomb can reach  # todo here
         # DROPPED_BOMB_WHILE_ENEMY_NEAR: 0.4,  # todo here
-        # IS_IN_BOMB_EXPLOSION_RADIUS: -0.2,
+        IS_IN_BOMB_EXPLOSION_RADIUS: -0.5,
+        MOVED_BACK_AND_FORTH: -0.5
     }
     reward_sum = 0
     for event in events:
