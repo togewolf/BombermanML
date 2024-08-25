@@ -8,13 +8,14 @@ import random
 
 
 class DeepQNetwork(nn.Module):
-    def __init__(self, lr, input_dims, l1_dims, l2_dims, l3_dims, dropout_rate=0.2):
+    def __init__(self, lr, input_dims, l1_dims, l2_dims, l3_dims, l4_dims, dropout_rate=0.3):
         super(DeepQNetwork, self).__init__()
         # torch.autograd.set_detect_anomaly(True)  # remove when it works
         self.input_dims = input_dims
         self.l1_dims = l1_dims
         self.l2_dims = l2_dims
         self.l3_dims = l3_dims
+        self.l4_dims = l4_dims
 
         self.l1 = nn.Linear(self.input_dims, self.l1_dims)
         self.dropout1 = nn.Dropout(p=dropout_rate)
@@ -22,7 +23,9 @@ class DeepQNetwork(nn.Module):
         self.dropout2 = nn.Dropout(p=dropout_rate)
         self.l3 = nn.Linear(self.l2_dims, self.l3_dims)
         self.dropout3 = nn.Dropout(p=dropout_rate)
-        self.lo = nn.Linear(self.l3_dims, 6)  # There are always six possible actions
+        self.l4 = nn.Linear(self.l3_dims, self.l4_dims)
+        self.dropout4 = nn.Dropout(p=dropout_rate)
+        self.lo = nn.Linear(self.l4_dims, 6)  # There are always six possible actions
 
         self.optimizer = optim.Adam(self.parameters(), lr=lr)
         self.loss = nn.MSELoss()
@@ -31,16 +34,22 @@ class DeepQNetwork(nn.Module):
             print("GPU not found!")
         self.to(self.device)
 
-    def forward(self, state):
+    def forward(self, state, train):  # todo try prelu or other activation functions
         x = f.relu(self.l1(state))
-        x = self.dropout1(x)
+        if train:
+            x = self.dropout1(x)
         x = f.relu(self.l2(x))
-        x = self.dropout2(x)
+        if train:
+            x = self.dropout2(x)
         x = f.relu(self.l3(x))
-        x = self.dropout3(x)
+        if train:
+            x = self.dropout3(x)
+        x = f.relu(self.l4(x))
+        if train:
+            x = self.dropout4(x)
         actions = self.lo(x)
         # actions_prob = torch.sigmoid_(actions)
-        # softmax would cause really weird errors here
+        # softmax/sigmoid causes really weird errors here
         return actions
 
 
@@ -57,8 +66,8 @@ class Agent:
         self.batch_size = batch_size
         self.mem_cntr = 0
 
-        self.Q_eval = DeepQNetwork(self.lr, input_dims=input_dims, l1_dims=128, l2_dims=128,
-                                   l3_dims=64)  # experiment here
+        self.Q_eval = DeepQNetwork(self.lr, input_dims=input_dims, l1_dims=256, l2_dims=256,
+                                   l3_dims=256, l4_dims=128)  # experiment here
 
         self.state_memory = np.zeros((self.mem_size, input_dims), dtype=np.float32)
         self.new_state_memory = np.zeros((self.mem_size, input_dims), dtype=np.float32)
@@ -66,7 +75,7 @@ class Agent:
         self.reward_memory = np.zeros(self.mem_size, dtype=np.float32)
         self.terminal_memory = np.zeros(self.mem_size, dtype=bool)
 
-    def store_transition(self, state, action, reward, state_, done):
+    def store_transition(self, state, action, reward, state_, done):  # state means features here
         index = self.mem_cntr % self.mem_size
         self.state_memory[index] = state
         if state_ is not None:
@@ -76,7 +85,6 @@ class Agent:
         self.reward_memory[index] = reward
         self.action_memory[index] = action
         self.terminal_memory[index] = done
-
         self.mem_cntr += 1
 
     def choose_action(self, game_state, train):
@@ -84,20 +92,20 @@ class Agent:
         self.logger.info("Epsilon = " + str(self.epsilon))
 
         blocked = features[3:7]
-        bomb_availabe = bool(features[2])
+        bomb_available = bool(features[2])
         in_explosion_radius = bool(features[3])
         if in_explosion_radius:
             blocked.append(1)  # do not wait in bomb radius
         else:
             blocked.append(0)
-        if not bomb_availabe:
+        if not bomb_available:
             blocked.append(1)
         else:
             blocked.append(0)
 
         if np.random.random() > self.epsilon or not train:
             state = torch.tensor([features], dtype=torch.float32).to(self.Q_eval.device)
-            actions = self.Q_eval.forward(state).squeeze()
+            actions = self.Q_eval.forward(state, train).squeeze()
 
             for i in range(6):
                 if blocked[i] == 1:
@@ -105,13 +113,13 @@ class Agent:
 
             action = torch.argmax(actions).item()
 
-            #action_probabilities = actions.clone().detach().softmax(dim=1).squeeze()
-            #action = torch.multinomial(action_probabilities, 1).item()
+            # action_probabilities = actions.clone().detach().softmax(dim=1).squeeze()
+            # action = torch.multinomial(action_probabilities, 1).item()
 
         else:
             p = [.20, .20, .20, .20, .10, .10]
 
-            for i in range(len(blocked)):
+            for i in range(6):
                 if blocked[i] == 1:
                     p[i] = 0
 
@@ -124,7 +132,7 @@ class Agent:
         last_actions_deque.append(action)
         return action
 
-    def learn(self):
+    def learn(self):  # todo: learning rate that decreases with time when there is no progress being made
         if self.mem_cntr < self.batch_size:
             return
 
@@ -142,8 +150,8 @@ class Agent:
 
         action_batch = self.action_memory[batch]
 
-        q_eval = self.Q_eval.forward(state_batch)[batch_index, action_batch]
-        q_next = self.Q_eval.forward(new_state_batch)
+        q_eval = self.Q_eval.forward(state_batch, 1)[batch_index, action_batch]
+        q_next = self.Q_eval.forward(new_state_batch, 1)
         q_next[terminal_batch] = 0.0
 
         q_target = reward_batch + self.gamma * torch.max(q_next, dim=1)[0]
@@ -158,8 +166,6 @@ class Agent:
 
 
 # followed https://www.youtube.com/watch?v=wc-FxNENg9U
-
-events_pre = [[0, 0, 0, 0], 0]  # needed to check events without recalculating stuff
 
 
 def state_to_features(game_state: dict) -> np.array:
@@ -329,5 +335,4 @@ last_actions_deque = deque(maxlen=4)
 
 
 def last_k_actions():
-    action_map = {'RIGHT': 0, 'DOWN': 1, 'LEFT': 2, 'UP': 3, 'WAIT': 4, 'BOMB': 5}
     return list(last_actions_deque) + [4] * (last_actions_deque.maxlen - len(last_actions_deque))  # padded with WAIT

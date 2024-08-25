@@ -1,5 +1,3 @@
-from collections import namedtuple, deque
-
 import pickle
 from typing import List
 
@@ -11,14 +9,6 @@ import csv  # to store scores
 ACTIONS = ['RIGHT', 'DOWN', 'LEFT', 'UP', 'WAIT', 'BOMB']
 ACTION_MAP = {action: idx for idx, action in enumerate(ACTIONS)}
 
-# This is only an example!
-Transition = namedtuple('Transition',
-                        ('state', 'action', 'next_state', 'reward'))
-
-# Hyper parameters -- DO modify
-TRANSITION_HISTORY_SIZE = 3  # keep only ... last transitions
-RECORD_ENEMY_TRANSITIONS = 1.0  # record enemy transitions with probability ...
-
 # Events
 MOVED_TOWARD_COIN = 'MOVED_TOWARD_COIN'  # toward the closest coin
 MOVED_TOWARD_CRATE = 'MOVED_TOWARD_CRATE'
@@ -26,7 +16,7 @@ DROPPED_BOMB_THAT_CAN_DESTROY_CRATE = 'DROPPED_BOMB_THAT_CAN_DESTROY_CRATE'  # r
 DROPPED_BOMB_WHILE_ENEMY_NEAR = 'DROPPED_BOMB_WHILE_ENEMY_NEAR'  # reward for each enemy
 IS_IN_BOMB_EXPLOSION_RADIUS = 'IS_IN_BOMB_EXPLOSION_RADIUS'  # perhaps differentiate between enemy and own bombs
 USELESS_BOMB = 'USELESS BOMB'  # no crate or enemy reachable by bomb  # or just punish each dropped bomb and reward usefulness
-TRAPPED_SELF = 'TRAPPED_SELF'  # placed bomb in entrance of dead end with length < 4 and went into dead end -> death imminent
+TRAPPED_SELF = 'TRAPPED_SELF'  # placed bomb in entrance of dead end with length < 4 and went into dead end -> death imminent. A similar feature for locating trapped enemies could be useful too
 MOVED_IN_BLOCKED_DIRECTION = 'MOVED_IN_BLOCKED_DIRECTION'
 MOVED_BACK_AND_FORTH = 'MOVED_BACK_AND_FORTH'
 
@@ -83,7 +73,7 @@ def game_events_occurred(self, old_game_state: dict, self_action: str, new_game_
     if self_action in action_to_direction:
         # Check if the action was in a blocked direction
         if blocked[['RIGHT', 'DOWN', 'LEFT', 'UP'].index(self_action)]:
-            events.append(MOVED_IN_BLOCKED_DIRECTION)
+            events.append(MOVED_IN_BLOCKED_DIRECTION)  # should not happen, since this is prohibited in the choose_action function
 
         # Check if the action was toward the nearest coin
         if nearest_coin_direction[['RIGHT', 'DOWN', 'LEFT', 'UP'].index(self_action)]:
@@ -159,10 +149,10 @@ def reward_from_events(self, events: List[str]) -> int:
         e.SURVIVED_ROUND: 7.5,
         e.BOMB_DROPPED: -0.5,
         MOVED_TOWARD_COIN: 0.2,
-        # MOVED_TOWARD_CRATE: 0.1,
+        # MOVED_TOWARD_CRATE: 0.1,  # todo
         MOVED_IN_BLOCKED_DIRECTION: -0.5,
-        # DROPPED_BOMB_THAT_CAN_DESTROY_CRATE: 0.2,  # reward per crate that the bomb can reach  # todo here
-        # DROPPED_BOMB_WHILE_ENEMY_NEAR: 0.4,  # todo here
+        # DROPPED_BOMB_THAT_CAN_DESTROY_CRATE: 0.2,  # reward per crate that the bomb can reach  # todo
+        # DROPPED_BOMB_WHILE_ENEMY_NEAR: 0.4,  # todo
         IS_IN_BOMB_EXPLOSION_RADIUS: -0.5,
         MOVED_BACK_AND_FORTH: -0.5
     }

@@ -23,11 +23,7 @@ def setup(self):
     self.last_positions = deque(maxlen=3)
     if not os.path.isfile("my-saved-model.pt"):
         self.logger.info("Setting up model from scratch.")
-        self.model = Agent(self.logger, gamma=0.9, epsilon=1.0, lr=1e-3, input_dims=28, batch_size=64)
-
-    elif self.train:
-        self.logger.info("Loading model from saved state.")
-        self.model = Agent(self.logger, gamma=0.9, epsilon=1.0, lr=5e-4, input_dims=28, batch_size=64)
+        self.model = Agent(self.logger, gamma=0.9, epsilon=1.0, lr=1e-4, input_dims=28, batch_size=64)
 
     else:
         self.logger.info("Loading model from saved state.")
