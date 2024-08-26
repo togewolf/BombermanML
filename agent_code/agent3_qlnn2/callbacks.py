@@ -21,13 +21,13 @@ def setup(self):
 
     :param self: This object is passed to all callbacks, and you can set arbitrary values.
     """
-    if self.train or not os.path.isfile("my-saved-model.pt"):
+    if self.train or not os.path.isfile("model.pt"):
         self.logger.info("Setting up model from scratch.")
         weights = np.random.rand(len(ACTIONS))
         self.model = weights / weights.sum()
     else:
         self.logger.info("Loading model from saved state.")
-        with open("my-saved-model.pt", "rb") as file:
+        with open("model.pt", "rb") as file:
             self.model = pickle.load(file)
 
 
