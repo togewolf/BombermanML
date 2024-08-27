@@ -30,7 +30,7 @@ def setup(self):
 
     if not os.path.isfile(model_filename):
         self.logger.info("Setting up model from scratch.")
-        self.model = Agent(self.logger, gamma=0.9, epsilon=1.0, lr=1e-4, input_dims=28, batch_size=64)
+        self.model = Agent(self.logger, gamma=0.9, epsilon=1.0, lr=1e-4, input_dims=28, batch_size=64, epoch_length=100)
 
     else:
         self.logger.info("Loading model from saved state.")
@@ -48,5 +48,5 @@ def act(self, game_state: dict) -> str:
     :return: The action to take as a string.
     """
     action = self.model.choose_action(game_state, self.train)
-    self.logger.info(ACTIONS[action])
+    self.logger.info("Action: " + ACTIONS[action])
     return ACTIONS[action]

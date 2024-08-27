@@ -1,10 +1,15 @@
+from venv import logger
+
 import torch
 import torch.nn as nn
 import torch.optim as optim
+import torch.optim.lr_scheduler as scheduler
 import numpy as np
 import torch.nn.functional as f
 from collections import deque
 import random
+
+from fontTools.misc.timeTools import epoch_diff
 
 
 class DeepQNetwork(nn.Module):
@@ -27,7 +32,13 @@ class DeepQNetwork(nn.Module):
         self.dropout4 = nn.Dropout(p=dropout_rate)
         self.lo = nn.Linear(self.l4_dims, 6)  # There are always six possible actions
 
+        # Optimizer (see https://pytorch.org/docs/stable/optim.html#algorithms)
         self.optimizer = optim.Adam(self.parameters(), lr=lr)
+
+        # LR Scheduler (see https://pytorch.org/docs/stable/optim.html#how-to-adjust-learning-rate)
+        self.scheduler = scheduler.ExponentialLR(self.optimizer, gamma=0.98)
+        #self.scheduler = scheduler.ReduceLROnPlateau(self.optimizer, ...)
+
         self.loss = nn.MSELoss()
         self.device = torch.device('cuda:0' if torch.cuda.is_available() else 'cpu')
         if not torch.cuda.is_available():
@@ -54,8 +65,8 @@ class DeepQNetwork(nn.Module):
 
 
 class Agent:
-    def __init__(self, logger, gamma, epsilon, lr, input_dims, batch_size, max_mem_size=100000, eps_end=0.1,
-                 eps_dec=1e-4):
+    def __init__(self, logger, gamma, epsilon, lr, input_dims, batch_size, epoch_length, max_mem_size=100000, eps_end=0.1,
+                 eps_dec=1e-2):
         self.logger = logger
         self.gamma = gamma
         self.epsilon = epsilon
@@ -64,7 +75,7 @@ class Agent:
         self.lr = lr
         self.mem_size = max_mem_size
         self.batch_size = batch_size
-        self.mem_cntr = 0
+        self.epoch_lenght = epoch_length
 
         self.Q_eval = DeepQNetwork(self.lr, input_dims=input_dims, l1_dims=256, l2_dims=256,
                                    l3_dims=256, l4_dims=128)  # experiment here
@@ -75,7 +86,10 @@ class Agent:
         self.reward_memory = np.zeros(self.mem_size, dtype=np.float32)
         self.terminal_memory = np.zeros(self.mem_size, dtype=bool)
 
+        self.mem_cntr = 0
         self.games_played = 0
+        self.epoch = 0
+        self.iteration = 0
 
     def store_transition(self, state, action, reward, state_, done):  # state means features here
         index = self.mem_cntr % self.mem_size
@@ -91,7 +105,6 @@ class Agent:
 
     def choose_action(self, game_state, train):
         features = state_to_features(game_state)
-        self.logger.info("Epsilon = " + str(self.epsilon))
 
         blocked = features[3:7]
         bomb_available = bool(features[2])
@@ -129,12 +142,12 @@ class Agent:
             p /= total_prob
 
             action = random.choices(range(6), weights=p, k=1)[0]
-            self.logger.info("Choose random action")
+            self.logger.info("Chose random action (Eps = " + str(self.epsilon) + ")")
 
         last_actions_deque.append(action)
         return action
 
-    def learn(self):  # todo: learning rate that decreases with time when there is no progress being made
+    def learn(self):
         if self.mem_cntr < self.batch_size:
             return
 
@@ -164,7 +177,14 @@ class Agent:
 
         self.Q_eval.optimizer.step()
 
-        self.epsilon = self.epsilon - self.eps_dec if self.epsilon > self.eps_min else self.eps_min
+        self.iteration += 1
+        if self.iteration % self.epoch_lenght == 0:
+            self.epoch += 1
+
+            self.Q_eval.scheduler.step()
+            self.epsilon = self.epsilon - self.eps_dec if self.epsilon > self.eps_min else self.eps_min
+
+        self.logger.info("LR = " + str(self.Q_eval.scheduler.get_last_lr()))
 
 
 # followed https://www.youtube.com/watch?v=wc-FxNENg9U
