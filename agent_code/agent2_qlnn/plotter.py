@@ -17,5 +17,5 @@ def plot_scores(scores):
     plt.show()
 
 
-scores = pd.read_csv('scores.csv')
+scores = pd.read_csv('model/scores.csv')
 plot_scores(scores)

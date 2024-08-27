@@ -4,6 +4,7 @@ from typing import List
 import events as e
 from .dqlnn_model import state_to_features
 
+import os
 import csv  # to store scores
 
 ACTIONS = ['RIGHT', 'DOWN', 'LEFT', 'UP', 'WAIT', 'BOMB']
@@ -28,7 +29,7 @@ def setup_training(self):
 
     :param self: This object is passed to all callbacks and you can set arbitrary values.
     """
-    pass
+    self.save_frequency = 10 # store a snapshot every n rounds
 
 def game_events_occurred(self, old_game_state: dict, self_action: str, new_game_state: dict, events: List[str]):
     """
@@ -114,16 +115,25 @@ def end_of_round(self, last_game_state: dict, last_action: str, events: List[str
     self.model.store_transition(state_to_features(last_game_state), ACTION_MAP[last_action],
                                 reward_from_events(self, events), None, done=True)
 
+    self.model.games_played += 1
+    # save snapshot of the model
+    os.makedirs('model/snapshots', exist_ok=True)
+    if self.model.games_played % self.save_frequency == 0:
+        with open('model/snapshots/model-' + str(self.model.games_played) + '.pt', 'wb') as file:
+            pickle.dump(self.model, file)
+
     # write scores to csv file
     score = last_game_state['self'][1]
-    file_name = 'scores.csv'
-    with open(file_name, mode='a', newline='') as file:
+
+
+    with open('model/scores.csv', mode='a', newline='') as file:
         writer = csv.writer(file)
         writer.writerow([score])
 
     # Store the model
-    with open("my-saved-model.pt", "wb") as file:
+    with open('model/model.pt', 'wb') as file:
         pickle.dump(self.model, file)
+
 
 
 def reward_from_events(self, events: List[str]) -> int:

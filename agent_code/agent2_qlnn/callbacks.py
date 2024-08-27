@@ -21,13 +21,20 @@ def setup(self):
     :param self: This object is passed to all callbacks, and you can set arbitrary values.
     """
     self.last_positions = deque(maxlen=3)
-    if not os.path.isfile("my-saved-model.pt"):
+
+    # load specific snapshot of model; if set to zero, the default (model/model.pt) will be loaded
+    # note that training from a snapshot n will save new snapshots as n+10, n+20 etc., thus overriding some of the previous snapshots
+    self.start_from_snapshot = 0
+
+    model_filename = 'model/model.pt' if self.start_from_snapshot == 0 else 'model/snapshots/model-' + str(self.start_from_snapshot) + '.pt'
+
+    if not os.path.isfile(model_filename):
         self.logger.info("Setting up model from scratch.")
         self.model = Agent(self.logger, gamma=0.9, epsilon=1.0, lr=1e-4, input_dims=28, batch_size=64)
 
     else:
         self.logger.info("Loading model from saved state.")
-        with open("my-saved-model.pt", "rb") as file:
+        with open(model_filename, 'rb') as file:
             self.model = pickle.load(file)
 
 

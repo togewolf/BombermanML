@@ -105,7 +105,7 @@ def end_of_round(self, last_game_state: dict, last_action: str, events: List[str
         Transition(state_to_features(last_game_state), last_action, None, reward_from_events(self, events)))
 
     # Store the model
-    with open("my-saved-model.pt", "wb") as file:
+    with open("model.pt", "wb") as file:
         pickle.dump(self.model, file)
 
 

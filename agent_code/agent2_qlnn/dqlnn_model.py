@@ -75,6 +75,8 @@ class Agent:
         self.reward_memory = np.zeros(self.mem_size, dtype=np.float32)
         self.terminal_memory = np.zeros(self.mem_size, dtype=bool)
 
+        self.games_played = 0
+
     def store_transition(self, state, action, reward, state_, done):  # state means features here
         index = self.mem_cntr % self.mem_size
         self.state_memory[index] = state
@@ -127,7 +129,7 @@ class Agent:
             p /= total_prob
 
             action = random.choices(range(6), weights=p, k=1)[0]
-            self.logger.info("Chose random action")
+            self.logger.info("Choose random action")
 
         last_actions_deque.append(action)
         return action
