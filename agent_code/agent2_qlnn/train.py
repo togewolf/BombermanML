@@ -29,7 +29,7 @@ def setup_training(self):
 
     :param self: This object is passed to all callbacks and you can set arbitrary values.
     """
-    self.save_frequency = 10 # store a snapshot every n rounds
+    self.save_frequency = 500 # store a snapshot every n rounds
 
 def game_events_occurred(self, old_game_state: dict, self_action: str, new_game_state: dict, events: List[str]):
     """
@@ -114,12 +114,12 @@ def end_of_round(self, last_game_state: dict, last_action: str, events: List[str
 
     self.model.store_transition(state_to_features(last_game_state), ACTION_MAP[last_action],
                                 reward_from_events(self, events), None, done=True)
+    self.model.learn(end_epoch=True)
 
-    self.model.games_played += 1
     # save snapshot of the model
     os.makedirs('model/snapshots', exist_ok=True)
-    if self.model.games_played % self.save_frequency == 0:
-        with open('model/snapshots/model-' + str(self.model.games_played) + '.pt', 'wb') as file:
+    if self.model.epoch % self.save_frequency == 0:
+        with open('model/snapshots/model-' + str(self.model.epoch) + '.pt', 'wb') as file:
             pickle.dump(self.model, file)
 
     # write scores to csv file

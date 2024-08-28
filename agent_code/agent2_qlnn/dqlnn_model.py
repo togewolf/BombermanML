@@ -10,6 +10,7 @@ from collections import deque
 import random
 
 from fontTools.misc.timeTools import epoch_diff
+from sympy import false
 
 
 class DeepQNetwork(nn.Module):
@@ -65,7 +66,7 @@ class DeepQNetwork(nn.Module):
 
 
 class Agent:
-    def __init__(self, logger, gamma, epsilon, lr, input_dims, batch_size, epoch_length, max_mem_size=100000, eps_end=0.1,
+    def __init__(self, logger, gamma, epsilon, lr, input_dims, batch_size, max_mem_size=100000, eps_end=0.1,
                  eps_dec=1e-2):
         self.logger = logger
         self.gamma = gamma
@@ -75,7 +76,6 @@ class Agent:
         self.lr = lr
         self.mem_size = max_mem_size
         self.batch_size = batch_size
-        self.epoch_lenght = epoch_length
 
         self.Q_eval = DeepQNetwork(self.lr, input_dims=input_dims, l1_dims=256, l2_dims=256,
                                    l3_dims=256, l4_dims=128)  # experiment here
@@ -87,9 +87,8 @@ class Agent:
         self.terminal_memory = np.zeros(self.mem_size, dtype=bool)
 
         self.mem_cntr = 0
-        self.games_played = 0
-        self.epoch = 0
         self.iteration = 0
+        self.epoch = 0
 
     def store_transition(self, state, action, reward, state_, done):  # state means features here
         index = self.mem_cntr % self.mem_size
@@ -147,7 +146,7 @@ class Agent:
         last_actions_deque.append(action)
         return action
 
-    def learn(self):
+    def learn(self, end_epoch=False):
         if self.mem_cntr < self.batch_size:
             return
 
@@ -178,10 +177,10 @@ class Agent:
         self.Q_eval.optimizer.step()
 
         self.iteration += 1
-        if self.iteration % self.epoch_lenght == 0:
+        if end_epoch:
             self.epoch += 1
 
-            self.Q_eval.scheduler.step()
+            #self.Q_eval.scheduler.step()
             self.epsilon = self.epsilon - self.eps_dec if self.epsilon > self.eps_min else self.eps_min
 
         self.logger.info("LR = " + str(self.Q_eval.scheduler.get_last_lr()))
