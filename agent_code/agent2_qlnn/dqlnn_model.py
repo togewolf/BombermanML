@@ -8,7 +8,7 @@ import random
 
 
 class DeepQNetwork(nn.Module):
-    def __init__(self, lr, input_dims, l1_dims, l2_dims, l3_dims, l4_dims, dropout_rate=0.3):
+    def __init__(self, lr, input_dims, l1_dims, l2_dims, l3_dims, l4_dims, dropout_rate=0.1):
         super(DeepQNetwork, self).__init__()
         # torch.autograd.set_detect_anomaly(True)  # remove when it works
         self.input_dims = input_dims
@@ -66,8 +66,8 @@ class Agent:
         self.batch_size = batch_size
         self.mem_cntr = 0
 
-        self.Q_eval = DeepQNetwork(self.lr, input_dims=input_dims, l1_dims=256, l2_dims=256,
-                                   l3_dims=256, l4_dims=128)  # experiment here
+        self.Q_eval = DeepQNetwork(self.lr, input_dims=input_dims, l1_dims=64, l2_dims=64,
+                                   l3_dims=64, l4_dims=64)  # experiment here
 
         self.state_memory = np.zeros((self.mem_size, input_dims), dtype=np.float32)
         self.new_state_memory = np.zeros((self.mem_size, input_dims), dtype=np.float32)
@@ -114,7 +114,7 @@ class Agent:
             action = torch.argmax(actions).item()
 
             # action_probabilities = actions.clone().detach().softmax(dim=1).squeeze()
-            # action = torch.multinomial(action_probabilities, 1).item()
+            # action = torch.multinomial(torch.sigmoid_(actions), 1).item()
 
         else:
             p = [.20, .20, .20, .20, .10, .10]

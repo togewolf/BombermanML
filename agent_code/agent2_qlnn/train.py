@@ -148,13 +148,13 @@ def reward_from_events(self, events: List[str]) -> int:
         e.OPPONENT_ELIMINATED: 3,
         e.SURVIVED_ROUND: 7.5,
         e.BOMB_DROPPED: -0.5,
-        MOVED_TOWARD_COIN: 0.2,
+        MOVED_TOWARD_COIN: 0.3,
         # MOVED_TOWARD_CRATE: 0.1,  # todo
         MOVED_IN_BLOCKED_DIRECTION: -0.5,
         # DROPPED_BOMB_THAT_CAN_DESTROY_CRATE: 0.2,  # reward per crate that the bomb can reach  # todo
         # DROPPED_BOMB_WHILE_ENEMY_NEAR: 0.4,  # todo
         IS_IN_BOMB_EXPLOSION_RADIUS: -0.5,
-        MOVED_BACK_AND_FORTH: -0.5
+        MOVED_BACK_AND_FORTH: -0.75
     }
     reward_sum = 0
     for event in events:
