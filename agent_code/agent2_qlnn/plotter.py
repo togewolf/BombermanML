@@ -34,4 +34,4 @@ def plot_scores(csv_file, miny, maxy, auto_update=False, update_interval=5000, s
 
     plt.show()
 
-plot_scores('model/scores.csv', miny=0, maxy=30, auto_update=True)
+plot_scores('model/scores.csv', miny=0, maxy=50, auto_update=True)

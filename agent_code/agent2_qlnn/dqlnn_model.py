@@ -25,13 +25,13 @@ class DeepQNetwork(nn.Module):
 
         self.l1 = nn.Linear(self.input_dims, self.l1_dims)
         self.dropout1 = nn.Dropout(p=dropout_rate)
-        self.l2 = nn.Linear(self.l1_dims, self.l2_dims)
-        self.dropout2 = nn.Dropout(p=dropout_rate)
-        self.l3 = nn.Linear(self.l2_dims, self.l3_dims)
-        self.dropout3 = nn.Dropout(p=dropout_rate)
-        self.l4 = nn.Linear(self.l3_dims, self.l4_dims)
-        self.dropout4 = nn.Dropout(p=dropout_rate)
-        self.lo = nn.Linear(self.l4_dims, 6)  # There are always six possible actions
+        #self.l2 = nn.Linear(self.l1_dims, self.l2_dims)
+        #self.dropout2 = nn.Dropout(p=dropout_rate)
+        #self.l3 = nn.Linear(self.l2_dims, self.l3_dims)
+        #self.dropout3 = nn.Dropout(p=dropout_rate)
+        #self.l4 = nn.Linear(self.l3_dims, self.l4_dims)
+        #self.dropout4 = nn.Dropout(p=dropout_rate)
+        self.lo = nn.Linear(self.l1_dims, 6)  # There are always six possible actions
 
         # Optimizer (see https://pytorch.org/docs/stable/optim.html#algorithms)
         self.optimizer = optim.Adam(self.parameters(), lr=lr)
@@ -50,15 +50,15 @@ class DeepQNetwork(nn.Module):
         x = f.relu(self.l1(state))
         if train:
             x = self.dropout1(x)
-        x = f.relu(self.l2(x))
-        if train:
-            x = self.dropout2(x)
-        x = f.relu(self.l3(x))
-        if train:
-            x = self.dropout3(x)
-        x = f.relu(self.l4(x))
-        if train:
-            x = self.dropout4(x)
+        #x = f.relu(self.l2(x))
+        #if train:
+        #    x = self.dropout2(x)
+        #x = f.relu(self.l3(x))
+        #if train:
+        #    x = self.dropout3(x)
+        #x = f.relu(self.l4(x))
+        #if train:
+        #    x = self.dropout4(x)
         actions = self.lo(x)
         # actions_prob = torch.sigmoid_(actions)
         # softmax/sigmoid causes really weird errors here
@@ -77,8 +77,8 @@ class Agent:
         self.mem_size = max_mem_size
         self.batch_size = batch_size
 
-        self.Q_eval = DeepQNetwork(self.lr, input_dims=input_dims, l1_dims=256, l2_dims=256,
-                                   l3_dims=256, l4_dims=128)  # experiment here
+        self.Q_eval = DeepQNetwork(self.lr, input_dims=input_dims, l1_dims=8, l2_dims=10,
+                                   l3_dims=8, l4_dims=8)  # experiment here
 
         self.state_memory = np.zeros((self.mem_size, input_dims), dtype=np.float32)
         self.new_state_memory = np.zeros((self.mem_size, input_dims), dtype=np.float32)
