@@ -55,12 +55,12 @@ def game_events_occurred(self, old_game_state: dict, self_action: str, new_game_
     old_features = state_to_features(old_game_state)
     new_features = state_to_features(new_game_state)
 
-    if new_features[7] == 1:
-        events.append(IS_IN_BOMB_EXPLOSION_RADIUS)
+    #if new_features[7] == 1:
+    #    events.append(IS_IN_BOMB_EXPLOSION_RADIUS)
 
     # Retrieve the precomputed blocked directions and nearest coin direction index from events_pre
-    blocked = old_features[3:7]
-    nearest_coin_direction = old_features[8:12]
+    #blocked = old_features[3:7]
+    #nearest_coin_direction = old_features[8:12]
 
     _, _, _, (ax, ay) = old_game_state['self']
 
@@ -72,13 +72,14 @@ def game_events_occurred(self, old_game_state: dict, self_action: str, new_game_
         'UP': (ax, ay - 1)
     }
     if self_action in action_to_direction:
+        pass
         # Check if the action was in a blocked direction
-        if blocked[['RIGHT', 'DOWN', 'LEFT', 'UP'].index(self_action)]:
-            events.append(MOVED_IN_BLOCKED_DIRECTION)  # should not happen, since this is prohibited in the choose_action function
+        #if blocked[['RIGHT', 'DOWN', 'LEFT', 'UP'].index(self_action)]:
+        #    events.append(MOVED_IN_BLOCKED_DIRECTION)  # should not happen, since this is prohibited in the choose_action function
 
         # Check if the action was toward the nearest coin
-        if nearest_coin_direction[['RIGHT', 'DOWN', 'LEFT', 'UP'].index(self_action)]:
-            events.append(MOVED_TOWARD_COIN)
+        #if nearest_coin_direction[['RIGHT', 'DOWN', 'LEFT', 'UP'].index(self_action)]:
+        #    events.append(MOVED_TOWARD_COIN)
 
     _, _, _, (ax, ay) = new_game_state['self']
     new_position = (ax, ay)

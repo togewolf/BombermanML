@@ -8,10 +8,10 @@ import numpy as np
 import torch.nn.functional as f
 from collections import deque
 import random
+from heapq import heapify, heappop, heappush
 
 from fontTools.misc.timeTools import epoch_diff
 from sympy import false
-
 
 class DeepQNetwork(nn.Module):
     def __init__(self, lr, input_dims, l1_dims, l2_dims, l3_dims, l4_dims, dropout_rate=0.3):
@@ -105,25 +105,25 @@ class Agent:
     def choose_action(self, game_state, train):
         features = state_to_features(game_state)
 
-        blocked = features[3:7]
-        bomb_available = bool(features[2])
-        in_explosion_radius = bool(features[3])
-        if in_explosion_radius:
-            blocked.append(1)  # do not wait in bomb radius
-        else:
-            blocked.append(0)
-        if not bomb_available:
-            blocked.append(1)
-        else:
-            blocked.append(0)
+        #blocked = features[3:7]
+        #bomb_available = bool(features[2])
+        #in_explosion_radius = bool(features[3])
+        #if in_explosion_radius:
+        #    blocked.append(1)  # do not wait in bomb radius
+        #else:
+        #    blocked.append(0)
+        #if not bomb_available:
+        #    blocked.append(1)
+        #else:
+        #    blocked.append(0)
 
         if np.random.random() > self.epsilon or not train:
             state = torch.tensor([features], dtype=torch.float32).to(self.Q_eval.device)
             actions = self.Q_eval.forward(state, train).squeeze()
 
-            for i in range(6):
-                if blocked[i] == 1:
-                    actions[i] = -9999
+            #for i in range(6):
+            #    if blocked[i] == 1:
+            #        actions[i] = -9999
 
             action = torch.argmax(actions).item()
 
@@ -133,9 +133,9 @@ class Agent:
         else:
             p = [.20, .20, .20, .20, .10, .10]
 
-            for i in range(6):
-                if blocked[i] == 1:
-                    p[i] = 0
+            #for i in range(6):
+            #    if blocked[i] == 1:
+            #        p[i] = 0
 
             total_prob = np.sum(p)
             p /= total_prob
@@ -143,7 +143,7 @@ class Agent:
             action = random.choices(range(6), weights=p, k=1)[0]
             self.logger.info("Chose random action (Eps = " + str(self.epsilon) + ")")
 
-        last_actions_deque.append(action)
+        #last_actions_deque.append(action)
         return action
 
     def learn(self, end_epoch=False):
@@ -188,6 +188,14 @@ class Agent:
 
 # followed https://www.youtube.com/watch?v=wc-FxNENg9U
 
+# Direction Mapping: invert direction by multiplying with -1
+dUP = -2
+dLEFT = -1
+dNONE = 0
+dRIGHT = 1
+dDOWN = 2
+
+INF = 999 # 999 represents infinity
 
 def state_to_features(game_state: dict) -> np.array:
     """
@@ -211,40 +219,36 @@ def state_to_features(game_state: dict) -> np.array:
 
     _, _, bomb_available, (ax, ay) = game_state['self']
     arena = game_state['field']
-    coins = game_state['coins']
-    # bombs = game_state['bombs']  # [(x, y), countdown]
+    coins = game_state['coins'] # [(x, y)]
+    bombs = game_state['bombs'] # [(x, y), countdown]
 
-    features.append(ax)
-    features.append(ay)
-    features.append(int(bomb_available))
+    dist, grad = distance_map(ax, ay, arena)
 
-    blocked = is_blocked(game_state)
-    features.extend(blocked)  # indices 3 to 6
+    #features.append(ax)
+    #features.append(ay)
+    #features.append(int(bomb_available))
 
-    in_explosion_radius = is_in_explosion_radius(game_state, ax, ay)
-    features.append(in_explosion_radius)  # 7
+    #blocked = is_blocked(game_state)
+    #features.extend(blocked)
 
-    nearest_coins = k_nearest_coins(ax, ay, coins)  # todo: perhaps use embedding for this
-    # for (cx, cy) in nearest_coins:
-    #    features.append(cx)
-    #    features.append(cy)
+    #in_explosion_radius = is_in_explosion_radius(game_state, ax, ay)
+    #features.append(in_explosion_radius)
 
-    # Direction to the nearest coin (one-hot encoded)
-    if nearest_coins:
-        direction_idx = direction_to_nearest_coin(ax, ay, blocked, nearest_coins[0], arena)
-    else:
-        direction_idx = None  # If no coins are available
+    nearest_coins = nearest_objects(dist, coins)
+    for coin in nearest_coins:
+        direction = direction_to_object(coin, grad)
+        direction_one_hot = [
+            int(direction == dRIGHT),
+            int(direction == dDOWN),
+            int(direction == dLEFT),
+            int(direction == dUP),
+        ]
+        features.extend(direction_one_hot)
 
-    # One-hot encode the direction (0: right, 1: down, 2: left, 3: up)
-    direction_one_hot = [0, 0, 0, 0]
-    if direction_idx is not None:
-        direction_one_hot[direction_idx] = 1
-    features.extend(direction_one_hot)  # 9-12
+    #bomb_positions = relative_bomb_positions(game_state, ax, ay)
+    #features.extend(bomb_positions)
 
-    bomb_positions = relative_bomb_positions(game_state, ax, ay)
-    features.extend(bomb_positions)
-
-    features.extend(last_k_actions())
+    #features.extend(last_k_actions())
 
     # todo:
     # k nearest crates
@@ -257,6 +261,34 @@ def state_to_features(game_state: dict) -> np.array:
     # embedding of entire game state?
 
     return features  # length: 1+1+1+4+6+4+12+1+4 = 32
+
+# Use Dijkstra to calculate distance to every position and corresponding gradient
+def distance_map(ax, ay, arena):
+    dist = np.full_like(arena, INF)
+    grad = np.full_like(arena, dNONE)
+    scanned = np.full_like(arena, False)
+
+    dist[ax, ay] = 0
+
+    pq = [(0, (ax, ay))]
+    heapify(pq)
+
+    while pq:
+        d, (x, y) = heappop(pq)
+
+        if scanned[x, y]:
+            continue
+        scanned[x, y] = True
+
+        for dx, dy in [(-1, 0), (1, 0), (0, -1), (0, 1)]:
+            if arena[x+dx, y+dy] == 0:
+                # relax node
+                if d + 1 < dist[x+dx, y+dy]:
+                    dist[x+dx, y+dy] = d + 1
+                    grad[x+dx, y+dy] = -dx - 2*dy
+                    heappush(pq, (d + 1, (x+dx, y+dy)))
+
+    return dist, grad
 
 
 def is_blocked(game_state: dict):
@@ -279,44 +311,35 @@ def is_blocked(game_state: dict):
     return np.array(blocked)
 
 
-def k_nearest_coins(ax, ay, coins):
-    k = 3  # hyperparameter
+# Sort coins by distance and get the k nearest ones
+def nearest_objects(dist, objects, k=1):
+    objects.sort(key=lambda obj: dist[obj[0], obj[1]])
+    objects = objects[:k]
 
-    # Calculate distances between the agent and each coin
-    distances = [(x, y, np.linalg.norm([ax - x, ay - y])) for (x, y) in coins]
+    while len(objects) < k:
+        objects.append((-1, -1))
 
-    # Sort coins based on the distance
-    distances.sort(key=lambda item: item[2])
+    return objects
 
-    # Get the k nearest coins (coordinates relative to agent)
-    nearest_coins = [(x - ax, y - ay) for (x, y, _) in distances[:k]]
+# Follow gradient to agent, to determine path
+def direction_to_object(obj, grad):
+    if obj == (-1, -1):
+        return dNONE
+    x, y = obj
 
-    while len(nearest_coins) < k:
-        nearest_coins.append((-1, -1))
+    direction = dNONE
+    while grad[x, y] != dNONE:
+        direction = -grad[x, y]
+        if grad[x, y] == dUP:
+            y -= 1
+        elif grad[x, y] == dDOWN:
+            y += 1
+        elif grad[x, y] == dLEFT:
+            x -= 1
+        elif grad[x, y] == dRIGHT:
+            x += 1
 
-    return nearest_coins
-
-
-def direction_to_nearest_coin(ax, ay, blocked, nearest_coin, arena):
-    cx, cy = nearest_coin
-
-    # Calculate the priority for moving in each direction based on the relative position of the coin
-    directions = [
-        ('right', (ax + 1, ay), 0, cx > ax),  # Right
-        ('down', (ax, ay + 1), 1, cy > ay),  # Down
-        ('left', (ax - 1, ay), 2, cx < ax),  # Left
-        ('up', (ax, ay - 1), 3, cy < ay)  # Up
-    ]
-
-    # Sort directions by whether they move closer to the coin, considering blocked paths
-    directions.sort(key=lambda z: (not z[3], blocked[z[2]]))  # Priority: closer to coin, not blocked
-
-    # Choose the first valid direction that is not blocked
-    for direction, (x, y), idx, _ in directions:
-        if not blocked[idx] and arena[x, y] == 0:  # Ensure the path is free (not blocked, no walls/crates)
-            return idx
-
-    return None  # If all directions are blocked
+    return direction
 
 
 def relative_bomb_positions(game_state, ax, ay):
