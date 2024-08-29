@@ -111,4 +111,8 @@ screenshots/*.webm
 
 replays/
 results/
+model/
 /agent_code/test_copied_agent_ql_tree/
+
+# not working?
+.idea/

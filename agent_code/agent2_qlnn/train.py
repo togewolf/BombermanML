@@ -4,6 +4,7 @@ from typing import List
 import events as e
 from .dqlnn_model import state_to_features
 
+import os
 import csv  # to store scores
 
 ACTIONS = ['RIGHT', 'DOWN', 'LEFT', 'UP', 'WAIT', 'BOMB']
@@ -28,7 +29,7 @@ def setup_training(self):
 
     :param self: This object is passed to all callbacks and you can set arbitrary values.
     """
-    pass
+    self.save_frequency = 500 # store a snapshot every n rounds
 
 def game_events_occurred(self, old_game_state: dict, self_action: str, new_game_state: dict, events: List[str]):
     """
@@ -54,12 +55,12 @@ def game_events_occurred(self, old_game_state: dict, self_action: str, new_game_
     old_features = state_to_features(old_game_state)
     new_features = state_to_features(new_game_state)
 
-    if new_features[7] == 1:
-        events.append(IS_IN_BOMB_EXPLOSION_RADIUS)
+    #if new_features[7] == 1:
+    #    events.append(IS_IN_BOMB_EXPLOSION_RADIUS)
 
     # Retrieve the precomputed blocked directions and nearest coin direction index from events_pre
-    blocked = old_features[3:7]
-    nearest_coin_direction = old_features[8:12]
+    #blocked = old_features[3:7]
+    #nearest_coin_direction = old_features[8:12]
 
     _, _, _, (ax, ay) = old_game_state['self']
 
@@ -71,13 +72,14 @@ def game_events_occurred(self, old_game_state: dict, self_action: str, new_game_
         'UP': (ax, ay - 1)
     }
     if self_action in action_to_direction:
+        pass
         # Check if the action was in a blocked direction
-        if blocked[['RIGHT', 'DOWN', 'LEFT', 'UP'].index(self_action)]:
-            events.append(MOVED_IN_BLOCKED_DIRECTION)  # should not happen, since this is prohibited in the choose_action function
+        #if blocked[['RIGHT', 'DOWN', 'LEFT', 'UP'].index(self_action)]:
+        #    events.append(MOVED_IN_BLOCKED_DIRECTION)  # should not happen, since this is prohibited in the choose_action function
 
         # Check if the action was toward the nearest coin
-        if nearest_coin_direction[['RIGHT', 'DOWN', 'LEFT', 'UP'].index(self_action)]:
-            events.append(MOVED_TOWARD_COIN)
+        #if nearest_coin_direction[['RIGHT', 'DOWN', 'LEFT', 'UP'].index(self_action)]:
+        #    events.append(MOVED_TOWARD_COIN)
 
     _, _, _, (ax, ay) = new_game_state['self']
     new_position = (ax, ay)
@@ -113,17 +115,26 @@ def end_of_round(self, last_game_state: dict, last_action: str, events: List[str
 
     self.model.store_transition(state_to_features(last_game_state), ACTION_MAP[last_action],
                                 reward_from_events(self, events), None, done=True)
+    self.model.learn(end_epoch=True)
+
+    # save snapshot of the model
+    os.makedirs('model/snapshots', exist_ok=True)
+    if self.model.epoch % self.save_frequency == 0:
+        with open('model/snapshots/model-' + str(self.model.epoch) + '.pt', 'wb') as file:
+            pickle.dump(self.model, file)
 
     # write scores to csv file
     score = last_game_state['self'][1]
-    file_name = 'scores.csv'
-    with open(file_name, mode='a', newline='') as file:
+
+
+    with open('model/scores.csv', mode='a', newline='') as file:
         writer = csv.writer(file)
         writer.writerow([score])
 
     # Store the model
-    with open("my-saved-model.pt", "wb") as file:
+    with open('model/model.pt', 'wb') as file:
         pickle.dump(self.model, file)
+
 
 
 def reward_from_events(self, events: List[str]) -> int:
