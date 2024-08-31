@@ -218,49 +218,39 @@ def state_to_features(game_state: dict) -> np.array:
     features = []
 
     _, _, bomb_available, (ax, ay) = game_state['self']
+    others = [(x, y) for _, _, _, (x, y) in game_state['others']]
     arena = game_state['field']
     coins = game_state['coins'] # [(x, y)]
     bombs = game_state['bombs'] # [(x, y), countdown]
+    explosion_map = game_state['explosion_map']
 
-    dist, grad = distance_map(ax, ay, arena)
+    dist, grad, crates = distance_map(ax, ay, arena)
+    players = player_map(ax, ay, others, arena)
+    danger = danger_map(bombs, explosion_map, dist)
 
-    #features.append(ax)
-    #features.append(ay)
+    #print("Maps:")
+    #print(dist)
+    #print(grad)
+    #print(crates)
+    #print(players)
+    #print(danger)
+
     #features.append(int(bomb_available))
 
-    #blocked = is_blocked(game_state)
-    #features.extend(blocked)
-
-    #in_explosion_radius = is_in_explosion_radius(game_state, ax, ay)
-    #features.append(in_explosion_radius)
-
-    nearest_coins = nearest_objects(dist, coins)
+    nearest_coins = nearest_objects(dist, coins, k=1)
     for coin in nearest_coins:
         direction = direction_to_object(coin, grad)
         direction_one_hot = [
-            int(direction == dRIGHT),
-            int(direction == dDOWN),
-            int(direction == dLEFT),
-            int(direction == dUP),
+            float(direction == dRIGHT),
+            float(direction == dDOWN),
+            float(direction == dLEFT),
+            float(direction == dUP),
         ]
-        features.extend(direction_one_hot)
-
-    #bomb_positions = relative_bomb_positions(game_state, ax, ay)
-    #features.extend(bomb_positions)
+        features.extend([x / dist[coin[0], coin[1]] for x in direction_one_hot])
 
     #features.extend(last_k_actions())
 
-    # todo:
-    # k nearest crates
-    # direction to nearest crate
-    # 4 bomb positions relative
-    # is in explosion radius (with bomb timer, inverse intensity)
-    # is at outer wall
-    # the last k actions
-    # positions of other agents
-    # embedding of entire game state?
-
-    return features  # length: 1+1+1+4+6+4+12+1+4 = 32
+    return features
 
 # Use Dijkstra to calculate distance to every position and corresponding gradient
 def distance_map(ax, ay, arena):
@@ -268,7 +258,10 @@ def distance_map(ax, ay, arena):
     grad = np.full_like(arena, dNONE)
     scanned = np.full_like(arena, False)
 
+    crates = np.full_like(arena, INF)
+
     dist[ax, ay] = 0
+    crates[ax, ay] = 0
 
     pq = [(0, (ax, ay))]
     heapify(pq)
@@ -281,45 +274,18 @@ def distance_map(ax, ay, arena):
         scanned[x, y] = True
 
         for dx, dy in [(-1, 0), (1, 0), (0, -1), (0, 1)]:
-            if arena[x+dx, y+dy] == 0:
+            if arena[x+dx, y+dy] != -1:
                 # relax node
                 if d + 1 < dist[x+dx, y+dy]:
                     dist[x+dx, y+dy] = d + 1
                     grad[x+dx, y+dy] = -dx - 2*dy
+                    crates[x+dx, y+dy] = crates[x, y] + arena[x+dx, y+dy]
                     heappush(pq, (d + 1, (x+dx, y+dy)))
 
-    return dist, grad
+    return dist, grad, crates
 
-
-def is_blocked(game_state: dict):
-    """Returns a vector of 4 values, for each direction whether it
-    is blocked by a wall, crate, agent, todo bomb or (imminent) explosion."""
-    _, _, _, (ax, ay) = game_state['self']
-    arena = game_state['field']
-    others = [(x, y) for _, _, _, (x, y) in game_state['others']]
-
-    directions = [(ax + 1, ay), (ax, ay + 1), (ax - 1, ay), (ax, ay - 1)]  # Right, Down, Left, Up
-    blocked = []
-
-    for (x, y) in directions:
-        if arena[x, y] == -1 or arena[x, y] == 1:
-            blocked.append(1)  # Blocked by a wall or crate
-        elif (x, y) in others:
-            blocked.append(1)  # Blocked by another agent
-        else:
-            blocked.append(0)  # The direction is not blocked
-    return np.array(blocked)
-
-
-# Sort coins by distance and get the k nearest ones
-def nearest_objects(dist, objects, k=1):
-    objects.sort(key=lambda obj: dist[obj[0], obj[1]])
-    objects = objects[:k]
-
-    while len(objects) < k:
-        objects.append((-1, -1))
-
-    return objects
+def direction_map(grad):
+    pass #todo
 
 # Follow gradient to agent, to determine path
 def direction_to_object(obj, grad):
@@ -341,42 +307,36 @@ def direction_to_object(obj, grad):
 
     return direction
 
+# Sort coins by distance and get the k nearest ones
+def nearest_objects(dist, objects, k=1):
+    objects.sort(key=lambda obj: dist[obj[0], obj[1]])
+    objects = objects[:k]
 
-def relative_bomb_positions(game_state, ax, ay):
-    bombs = game_state['bombs']
-    rel_positions = []
-    for (bx, by), countdown in bombs[:4]:  # Up to 4 bombs
-        rel_positions.append(bx - ax)
-        rel_positions.append(by - ay)
-        rel_positions.append(countdown)
-    while len(rel_positions) < 12:  # Ensure fixed length of 8 (4 bombs x 2 coordinates)
-        rel_positions.append(-1)  # Fill with -1 if fewer than 4 bombs
-    return rel_positions
+    while len(objects) < k:
+        objects.append((-1, -1))
 
+    return objects
 
-def is_in_explosion_radius(game_state, ax, ay):
-    bombs = game_state['bombs']
-    arena = game_state['field']  # arena[x, y] == -1 indicates a wall
+def danger_map(bombs, explosion_map, dist):
     explosion_radius = 3  # Bombs affect up to 3 fields in each direction
 
-    for (bx, by), countdown in bombs:
-        if bx == ax and abs(by - ay) <= explosion_radius:
-            # Check for walls blocking the vertical explosion
-            blocked = any(arena[bx, y] == -1 for y in range(min(by, ay) + 1, max(by, ay)))
-            if not blocked:
-                return 1
+    for (bx, by), t in bombs: # for every bomb
+        for dx, dy in [(-1, 0), (1, 0), (0, -1), (0, 1)]: # in every direction
+            for r in range(explosion_radius + 1): # from 0 to 3
+                if dist[bx + r*dx, by + r*dy] == INF: # explosion blocked by wall
+                    break
+                explosion_map[bx + r*dx, by + r*dy] = max(t + 3, explosion_map[bx + r*dx, by + r*dy])
 
-        if by == ay and abs(bx - ax) <= explosion_radius:
-            # Check for walls blocking the horizontal explosion
-            blocked = any(arena[x, by] == -1 for x in range(min(bx, ax) + 1, max(bx, ax)))
-            if not blocked:
-                return 1
+    return explosion_map
 
-    return 0
+def player_map(ax, ay, others, arena):
+    players = np.full_like(arena, 0)
+    players[ax, ay] = 1
+    for (x, y) in others:
+        players[x, y] = -1
 
+    return players
 
 last_actions_deque = deque(maxlen=4)
-
-
 def last_k_actions():
     return list(last_actions_deque) + [4] * (last_actions_deque.maxlen - len(last_actions_deque))  # padded with WAIT
