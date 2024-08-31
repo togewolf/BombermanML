@@ -21,6 +21,7 @@ TRAPPED_SELF = 'TRAPPED_SELF'  # todo placed bomb in entrance of dead end with l
 # we can just block the action that would lead to this event.
 MOVED_IN_BLOCKED_DIRECTION = 'MOVED_IN_BLOCKED_DIRECTION'  # todo (or just prevent, see above)
 WAITED_IN_EXPLOSION_RADIUS = "WAITED_IN_EXPLOSION_RADIUS"
+MOVED_AWAY_FROM_DANGER = "MOVED_AWAY_FROM_DANGER"  # todo: danger map with higher values closer to bombs, gets reward when danger value decreases, e.g. moves away from bomb
 
 
 def setup_training(self):
@@ -133,7 +134,6 @@ def reward_from_events(self, events: List[str]) -> int:
         e.COIN_COLLECTED: 5,
         e.KILLED_OPPONENT: 5,
         e.KILLED_SELF: -15,
-        e.COIN_FOUND: 1,  # Crate destroyed that contains coin
         e.GOT_KILLED: -5,
         e.INVALID_ACTION: -0.5,
         e.OPPONENT_ELIMINATED: 3,
