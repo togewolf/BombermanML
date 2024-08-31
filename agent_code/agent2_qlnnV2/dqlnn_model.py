@@ -73,7 +73,7 @@ class Agent:
         self.mem_size = max_mem_size
         self.batch_size = batch_size
 
-        self.Q_eval = DeepQNetwork(self.lr, input_dims=input_dims, l1_dims=512, l2_dims=512,
+        self.Q_eval = DeepQNetwork(self.lr, input_dims=input_dims, l1_dims=1024, l2_dims=1024,
                                    l3_dims=32, l4_dims=8)  # experiment here
 
         self.state_memory = np.zeros((self.mem_size, input_dims), dtype=np.float32)
@@ -102,7 +102,9 @@ class Agent:
     def choose_action(self, game_state, train):
         features = state_to_features(game_state)
 
-        # todo: build a constraints function that only allows safe and valid actions and block the invalid ones. Also block "getting stuck" e.g. repeating pattern of left right
+        # todo: build a constraints function that only allows safe and valid actions and block the invalid ones, making it impossible for the agent to kill itself
+        #  Also block "getting stuck" e.g. repeating pattern of left right, or waiting more than three turns in a row
+
         # blocked = []
 
         if np.random.random() > self.epsilon or not train:
