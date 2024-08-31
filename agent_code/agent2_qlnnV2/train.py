@@ -12,7 +12,7 @@ ACTION_MAP = {action: idx for idx, action in enumerate(ACTIONS)}
 # Events
 MOVED_TOWARD_CRATE = 'MOVED_TOWARD_CRATE'  # todo
 DROPPED_BOMB_THAT_CAN_DESTROY_CRATE = 'DROPPED_BOMB_THAT_CAN_DESTROY_CRATE'  # reward for each crate
-DROPPED_BOMB_NEXT_TO_CRATE = "DROPPED_BOMB_NEXT_TO_CRATE"  # todo
+DROPPED_BOMB_NEXT_TO_CRATE = "DROPPED_BOMB_NEXT_TO_CRATE"
 DROPPED_BOMB_WHILE_ENEMY_NEAR = 'DROPPED_BOMB_WHILE_ENEMY_NEAR'  # todo reward for each enemy
 IS_IN_BOMB_EXPLOSION_RADIUS = 'IS_IN_BOMB_EXPLOSION_RADIUS'
 TRAPPED_SELF = 'TRAPPED_SELF'  # todo placed bomb in entrance of dead end with length < 4 and went into dead end -> death imminent.
@@ -61,7 +61,16 @@ def game_events_occurred(self, old_game_state: dict, self_action: str, new_game_
     crate_count = old_features[1]
     self.logger.info("Crates reachable: " + str(crate_count))
     if self_action == 'BOMB':
-        # todo dropped bomb next to crate?
+        bomb_position = old_game_state['self'][3]
+
+        # Check adjacent tiles for crates
+        x, y = bomb_position
+        adjacent_positions = [(x - 1, y), (x + 1, y), (x, y - 1), (x, y + 1)]
+
+        for pos in adjacent_positions:
+            if old_game_state['field'][pos] == 1:  # Assuming 1 represents a crate
+                events.append(DROPPED_BOMB_NEXT_TO_CRATE)
+
         if crate_count > 0:
             for i in range(crate_count):
                 events.append(DROPPED_BOMB_THAT_CAN_DESTROY_CRATE)
@@ -132,8 +141,8 @@ def reward_from_events(self, events: List[str]) -> int:
         e.BOMB_DROPPED: -0.5,
         # MOVED_TOWARD_CRATE: 0.1,  # todo
         MOVED_IN_BLOCKED_DIRECTION: -0.5,
-        DROPPED_BOMB_THAT_CAN_DESTROY_CRATE: 0.5,  # reward per crate that the bomb can reach
-        # DROPPED_BOMB_WHILE_ENEMY_NEAR: 0.4,  # todo
+        DROPPED_BOMB_THAT_CAN_DESTROY_CRATE: 1,  # reward per crate that the bomb can reach
+        # DROPPED_BOMB_WHILE_ENEMY_NEAR: 1,  # todo
         IS_IN_BOMB_EXPLOSION_RADIUS: -0.3,
         WAITED_IN_EXPLOSION_RADIUS: -0.75
     }
