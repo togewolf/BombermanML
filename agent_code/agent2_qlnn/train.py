@@ -2,7 +2,7 @@ import pickle
 from typing import List
 
 import events as e
-from .dqlnn_model import state_to_features
+from .dqlnn_model import state_to_features, nearest_objects
 
 import os
 import csv  # to store scores
@@ -12,6 +12,7 @@ ACTION_MAP = {action: idx for idx, action in enumerate(ACTIONS)}
 
 # Events
 MOVED_TOWARD_COIN = 'MOVED_TOWARD_COIN'  # toward the closest coin
+MOVED_AWAY_FROM_COIN = 'MOVED_AWAY_FROM_COIN'
 MOVED_TOWARD_CRATE = 'MOVED_TOWARD_CRATE'
 DROPPED_BOMB_THAT_CAN_DESTROY_CRATE = 'DROPPED_BOMB_THAT_CAN_DESTROY_CRATE'  # reward for each crate
 DROPPED_BOMB_WHILE_ENEMY_NEAR = 'DROPPED_BOMB_WHILE_ENEMY_NEAR'  # reward for each enemy
@@ -62,27 +63,17 @@ def game_events_occurred(self, old_game_state: dict, self_action: str, new_game_
     #blocked = old_features[3:7]
     #nearest_coin_direction = old_features[8:12]
 
-    _, _, _, (ax, ay) = old_game_state['self']
+    _, _, _, (x1, y1) = old_game_state['self']
+    _, _, _, (x2, y2) = new_game_state['self']
+    new_position = (x2, y2)
 
-    # Map actions to positions
-    action_to_direction = {
-        'RIGHT': (ax + 1, ay),
-        'DOWN': (ax, ay + 1),
-        'LEFT': (ax - 1, ay),
-        'UP': (ax, ay - 1)
-    }
-    if self_action in action_to_direction:
-        pass
-        # Check if the action was in a blocked direction
-        #if blocked[['RIGHT', 'DOWN', 'LEFT', 'UP'].index(self_action)]:
-        #    events.append(MOVED_IN_BLOCKED_DIRECTION)  # should not happen, since this is prohibited in the choose_action function
+    old_coin = nearest_objects(old_features[0], old_game_state['coins'])
+    new_coin = nearest_objects(new_features[0], new_game_state['coins'])
 
-        # Check if the action was toward the nearest coin
-        #if nearest_coin_direction[['RIGHT', 'DOWN', 'LEFT', 'UP'].index(self_action)]:
-        #    events.append(MOVED_TOWARD_COIN)
-
-    _, _, _, (ax, ay) = new_game_state['self']
-    new_position = (ax, ay)
+    if old_features[0][old_coin[0][0], old_coin[0][1]] > new_features[0][new_coin[0][0], new_coin[0][1]]:
+       events.append(MOVED_TOWARD_COIN)
+    else:
+       events.append(MOVED_AWAY_FROM_COIN)
 
     # Update the last positions deque
     self.last_positions.append(new_position)
@@ -149,7 +140,7 @@ def reward_from_events(self, events: List[str]) -> int:
         e.MOVED_DOWN: -0.01,
         e.MOVED_LEFT: -0.01,
         e.MOVED_RIGHT: -0.01,
-        e.WAITED: -0.1,
+        e.WAITED: -0.3,
         e.COIN_COLLECTED: 5,
         e.KILLED_OPPONENT: 5,
         e.KILLED_SELF: -15,
@@ -160,6 +151,7 @@ def reward_from_events(self, events: List[str]) -> int:
         e.SURVIVED_ROUND: 7.5,
         e.BOMB_DROPPED: -0.5,
         MOVED_TOWARD_COIN: 0.3,
+        MOVED_AWAY_FROM_COIN: -0.3,
         # MOVED_TOWARD_CRATE: 0.1,  # todo
         MOVED_IN_BLOCKED_DIRECTION: -0.5,
         # DROPPED_BOMB_THAT_CAN_DESTROY_CRATE: 0.2,  # reward per crate that the bomb can reach  # todo

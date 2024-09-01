@@ -1,5 +1,3 @@
-from venv import logger
-
 import torch
 import torch.nn as nn
 import torch.optim as optim
@@ -10,35 +8,27 @@ from collections import deque
 import random
 from heapq import heapify, heappop, heappush
 
-from fontTools.misc.timeTools import epoch_diff
-from sympy import false
 
 class DeepQNetwork(nn.Module):
-    def __init__(self, lr, input_dims, l1_dims, l2_dims, l3_dims, l4_dims, dropout_rate=0.3):
+    def __init__(self, lr, input_dims, output_dims, dropout_rate=0.3):
         super(DeepQNetwork, self).__init__()
         # torch.autograd.set_detect_anomaly(True)  # remove when it works
-        self.input_dims = input_dims
-        self.l1_dims = l1_dims
-        self.l2_dims = l2_dims
-        self.l3_dims = l3_dims
-        self.l4_dims = l4_dims
 
-        self.l1 = nn.Linear(self.input_dims, self.l1_dims)
-        self.dropout1 = nn.Dropout(p=dropout_rate)
-        #self.l2 = nn.Linear(self.l1_dims, self.l2_dims)
-        #self.dropout2 = nn.Dropout(p=dropout_rate)
-        #self.l3 = nn.Linear(self.l2_dims, self.l3_dims)
-        #self.dropout3 = nn.Dropout(p=dropout_rate)
-        #self.l4 = nn.Linear(self.l3_dims, self.l4_dims)
-        #self.dropout4 = nn.Dropout(p=dropout_rate)
-        self.lo = nn.Linear(self.l1_dims, 6)  # There are always six possible actions
+        self.pool = nn.MaxPool2d(2, 2)
+        self.dropout = nn.Dropout(p=dropout_rate)
 
-        # Optimizer (see https://pytorch.org/docs/stable/optim.html#algorithms)
-        self.optimizer = optim.Adam(self.parameters(), lr=lr)
+        self.conv = nn.ModuleList([
+            nn.Conv2d(5, 3, 3, 1, 1),
+            nn.Conv2d(3, 1, 3, 1, 1),
+        ])
 
-        # LR Scheduler (see https://pytorch.org/docs/stable/optim.html#how-to-adjust-learning-rate)
-        self.scheduler = scheduler.ExponentialLR(self.optimizer, gamma=0.98)
-        #self.scheduler = scheduler.ReduceLROnPlateau(self.optimizer, ...)
+        self.linear = nn.ModuleList([
+            nn.Linear(16, 8)
+        ])
+        self.out = nn.Linear(8, output_dims)  # There are always six possible actions
+
+        self.optimizer = optim.Adam(self.parameters(), lr=lr)                   # see https://pytorch.org/docs/stable/optim.html#algorithms
+        self.scheduler = scheduler.ExponentialLR(self.optimizer, gamma=0.98)    # see https://pytorch.org/docs/stable/optim.html#how-to-adjust-learning-rate
 
         self.loss = nn.MSELoss()
         self.device = torch.device('cuda:0' if torch.cuda.is_available() else 'cpu')
@@ -46,27 +36,24 @@ class DeepQNetwork(nn.Module):
             print("GPU not found!")
         self.to(self.device)
 
-    def forward(self, state, train):  # todo try prelu or other activation functions
-        x = f.relu(self.l1(state))
-        if train:
-            x = self.dropout1(x)
-        #x = f.relu(self.l2(x))
-        #if train:
-        #    x = self.dropout2(x)
-        #x = f.relu(self.l3(x))
-        #if train:
-        #    x = self.dropout3(x)
-        #x = f.relu(self.l4(x))
-        #if train:
-        #    x = self.dropout4(x)
-        actions = self.lo(x)
-        # actions_prob = torch.sigmoid_(actions)
-        # softmax/sigmoid causes really weird errors here
+    def forward(self, state, train):
+        x = state
+        for conv in self.conv:
+            x = f.relu(conv(x))
+            x = self.pool(x)
+
+        x = x.reshape(x.shape[0], -1)
+        for lin in self.linear:
+            x = f.relu(lin(x))
+            if train:
+                x = self.dropout(x)
+
+        actions = self.out(x)
         return actions
 
 
 class Agent:
-    def __init__(self, logger, gamma, epsilon, lr, input_dims, batch_size, max_mem_size=100000, eps_end=0.1,
+    def __init__(self, logger, gamma, epsilon, lr, batch_size, input_dims=(5, 17, 17), output_dims=6, max_mem_size=100000, eps_end=0.1,
                  eps_dec=1e-2):
         self.logger = logger
         self.gamma = gamma
@@ -77,11 +64,10 @@ class Agent:
         self.mem_size = max_mem_size
         self.batch_size = batch_size
 
-        self.Q_eval = DeepQNetwork(self.lr, input_dims=input_dims, l1_dims=8, l2_dims=10,
-                                   l3_dims=8, l4_dims=8)  # experiment here
+        self.Q_eval = DeepQNetwork(self.lr, input_dims, output_dims)
 
-        self.state_memory = np.zeros((self.mem_size, input_dims), dtype=np.float32)
-        self.new_state_memory = np.zeros((self.mem_size, input_dims), dtype=np.float32)
+        self.state_memory = np.zeros((self.mem_size, input_dims[0], input_dims[1], input_dims[2]), dtype=np.float32)
+        self.new_state_memory = np.zeros((self.mem_size, input_dims[0], input_dims[1], input_dims[2]), dtype=np.float32)
         self.action_memory = np.zeros(self.mem_size, dtype=np.int32)
         self.reward_memory = np.zeros(self.mem_size, dtype=np.float32)
         self.terminal_memory = np.zeros(self.mem_size, dtype=bool)
@@ -105,25 +91,9 @@ class Agent:
     def choose_action(self, game_state, train):
         features = state_to_features(game_state)
 
-        #blocked = features[3:7]
-        #bomb_available = bool(features[2])
-        #in_explosion_radius = bool(features[3])
-        #if in_explosion_radius:
-        #    blocked.append(1)  # do not wait in bomb radius
-        #else:
-        #    blocked.append(0)
-        #if not bomb_available:
-        #    blocked.append(1)
-        #else:
-        #    blocked.append(0)
-
         if np.random.random() > self.epsilon or not train:
-            state = torch.tensor([features], dtype=torch.float32).to(self.Q_eval.device)
+            state = torch.tensor(np.array(features), dtype=torch.float32).to(self.Q_eval.device)
             actions = self.Q_eval.forward(state, train).squeeze()
-
-            #for i in range(6):
-            #    if blocked[i] == 1:
-            #        actions[i] = -9999
 
             action = torch.argmax(actions).item()
 
@@ -132,10 +102,6 @@ class Agent:
 
         else:
             p = [.20, .20, .20, .20, .10, .10]
-
-            #for i in range(6):
-            #    if blocked[i] == 1:
-            #        p[i] = 0
 
             total_prob = np.sum(p)
             p /= total_prob
@@ -228,6 +194,12 @@ def state_to_features(game_state: dict) -> np.array:
     players = player_map(ax, ay, others, arena)
     danger = danger_map(bombs, explosion_map, dist)
 
+    features.append(dist)
+    features.append(grad)
+    features.append(crates)
+    features.append(players)
+    features.append(danger)
+
     #print("Maps:")
     #print(dist)
     #print(grad)
@@ -237,20 +209,20 @@ def state_to_features(game_state: dict) -> np.array:
 
     #features.append(int(bomb_available))
 
-    nearest_coins = nearest_objects(dist, coins, k=1)
-    for coin in nearest_coins:
-        direction = direction_to_object(coin, grad)
-        direction_one_hot = [
-            float(direction == dRIGHT),
-            float(direction == dDOWN),
-            float(direction == dLEFT),
-            float(direction == dUP),
-        ]
-        features.extend([x / dist[coin[0], coin[1]] for x in direction_one_hot])
+    # nearest_coins = nearest_objects(dist, coins, k=1)
+    # for coin in nearest_coins:
+    #     direction = direction_to_object(coin, grad)
+    #     direction_one_hot = [
+    #         float(direction == dRIGHT),
+    #         float(direction == dDOWN),
+    #         float(direction == dLEFT),
+    #         float(direction == dUP),
+    #     ]
+    #     features.extend([x / dist[coin[0], coin[1]] for x in direction_one_hot])
 
     #features.extend(last_k_actions())
 
-    return features
+    return np.array(features)
 
 # Use Dijkstra to calculate distance to every position and corresponding gradient
 def distance_map(ax, ay, arena):
