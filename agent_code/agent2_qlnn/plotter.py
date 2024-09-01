@@ -2,7 +2,7 @@ import pandas as pd
 import matplotlib.pyplot as plt
 import matplotlib.animation as animation
 
-def plot_scores(csv_file, miny, maxy, auto_update=False, update_interval=5000, smoothing_window=10):
+def plot_scores(csv_file, miny, maxy, auto_update=False, update_interval=5000, smoothing_window=100, view_range=10000):
     scores = pd.read_csv(csv_file)
     scores_smooth = scores.rolling(window=smoothing_window).mean()
 
@@ -15,7 +15,7 @@ def plot_scores(csv_file, miny, maxy, auto_update=False, update_interval=5000, s
     ax.grid(True)
 
     line, = ax.plot(range(1, len(scores_smooth) + 1), scores_smooth, linestyle='-', color='b')
-    ax.set_xlim(smoothing_window, len(scores_smooth) + 1)
+    ax.set_xlim(max(smoothing_window, len(scores_smooth) - view_range), len(scores_smooth) + 1)
     ax.set_ylim(miny, maxy)
 
     def update(frame):
@@ -24,7 +24,7 @@ def plot_scores(csv_file, miny, maxy, auto_update=False, update_interval=5000, s
 
         # Update the data for the line plot
         line.set_data(range(1, len(scores_smooth) + 1), scores_smooth)
-        ax.set_xlim(smoothing_window, len(scores_smooth) + 1)
+        ax.set_xlim(max(smoothing_window, len(scores_smooth) - view_range), len(scores_smooth) + 1)
 
         return line,
 
