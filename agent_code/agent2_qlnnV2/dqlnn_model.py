@@ -51,7 +51,7 @@ class DeepQNetwork(nn.Module):
             x = self.dropout2(x)
         # x = f.relu(self.l3(x))
         # if train:
-        #   x = self.dropout3(x)
+        #    x = self.dropout3(x)
         # x = f.relu(self.l4(x))
         # if train:
         #    x = self.dropout4(x)
@@ -73,8 +73,8 @@ class Agent:
         self.mem_size = max_mem_size
         self.batch_size = batch_size
 
-        self.Q_eval = DeepQNetwork(self.lr, input_dims=input_dims, l1_dims=1024, l2_dims=1024,
-                                   l3_dims=32, l4_dims=8)  # experiment here
+        self.Q_eval = DeepQNetwork(self.lr, input_dims=input_dims, l1_dims=1024, l2_dims=512,
+                                   l3_dims=256, l4_dims=8)  # experiment here
 
         self.state_memory = np.zeros((self.mem_size, input_dims), dtype=np.float32)
         self.new_state_memory = np.zeros((self.mem_size, input_dims), dtype=np.float32)
@@ -100,20 +100,16 @@ class Agent:
         self.mem_cntr += 1
 
     def choose_action(self, game_state, train):
-        features = state_to_features(game_state)
-
-        # todo: build a constraints function that only allows safe and valid actions and block the invalid ones, making it impossible for the agent to kill itself
-        #  Also block "getting stuck" e.g. repeating pattern of left right, or waiting more than three turns in a row
-
-        # blocked = []
+        features = state_to_features(game_state, self.logger)
+        blocked = features[20:26]
 
         if np.random.random() > self.epsilon or not train:
             state = torch.tensor([features], dtype=torch.float32).to(self.Q_eval.device)
             actions = self.Q_eval.forward(state, train).squeeze()
 
-            # for i in range(6):
-            #    if blocked[i] == 1:
-            #        actions[i] = -9999
+            for i in range(6):
+                if blocked[i] == 1:
+                    actions[i] = -9999
 
             action = torch.argmax(actions).item()
 
@@ -123,9 +119,9 @@ class Agent:
         else:
             p = [.20, .20, .20, .20, .10, .10]
 
-            # for i in range(6):
-            #    if blocked[i] == 1:
-            #        p[i] = 0
+            for i in range(6):
+                if blocked[i] == 1:
+                    p[i] = 0
 
             total_prob = np.sum(p)
             p /= total_prob
@@ -185,7 +181,7 @@ dDOWN = 2
 INF = 999  # 999 represents infinity
 
 
-def state_to_features(game_state: dict) -> np.array:
+def state_to_features(game_state: dict, logger) -> np.array:
     """
     Converts the game state to the input of your model, i.e.
     a feature vector.
@@ -194,6 +190,7 @@ def state_to_features(game_state: dict) -> np.array:
     which is a dictionary. Consult 'get_state_for_agent' in environment.py to see
     what it contains.
 
+    :param logger: imported the logger here to log logs
     :param game_state:  A dictionary describing the current game board.
     :return: np.array
     """
@@ -211,28 +208,33 @@ def state_to_features(game_state: dict) -> np.array:
     crates = [tuple(pos) for pos in crates]  # so they are in the same format as the coins
     # bombs = game_state['bombs']  # [(x, y), countdown]
     dist, grad, crate_map = distance_map(ax, ay, field)
-    danger_zone = danger_map(game_state, dist)
+    danger_zone = danger_map(game_state)
     in_danger = False
     if danger_zone[ax, ay] == 1:
         in_danger = True
+    nearest_safe = nearest_safe_tile(field, danger_zone, dist, grad, in_danger)
+    # logger.info("In danger: " + str(in_danger))
+    # logger.info(danger_zone)
+    # logger.info("Distances to nearest safe tiles: " + str(nearest_safe))
+    # logger.info("Distance map: ")
+    # logger.info(dist)
 
     # features
     features.append(int(bomb_available))  # feat 0
     features.append(crates_reachable(ax, ay, field))  # feat 1
     features.append(in_danger)  # feat 2
-    features.extend(k_nearest_coins_feature(dist, coins, grad, k=1))  # feat 3, 4, 5, 6
-    features.extend(nearest_crate_feature(dist, crates, grad, k=1))  # feat 7, 8, 9, 10
-    features.extend(free_distance(ax, ay, field))  # 11-14
-    features.extend(nearest_safe_tile(game_state, dist, grad, in_danger))  # 15-18
-    features.extend(is_blocked(game_state))  # 19-22
-    features.extend(neighboring(ax, ay, game_state))  # 23-48  # todo perhaps a separate convolutional subnetwork for this
-    # features.extend(last_k_actions())
+    features.append(is_stuck())  # feat 3
+    features.extend(k_nearest_coins_feature(dist, coins, grad, k=1))  # feat 4-7
+    features.extend(nearest_crate_feature(dist, crates, grad, k=1))  # feat 8-11
+    features.extend(free_distance(ax, ay, field))  # 12-15
+    features.extend(nearest_safe)  # 16-19
+    features.extend(disallowed_actions(game_state, dist, grad, nearest_safe))  # 20-25
+    # features.extend(neighboring(ax, ay, game_state))  # 24-49  # todo perhaps a separate convolutional subnetwork for this
+    # features.extend(last_k_actions())  # 50-53
     # todo: add all other features with their sizes in one line like this for clarity
 
     # todo:
     # bomb positions
-    # is in explosion radius (with bomb timer, inverse intensity)
-    # is at outer wall
     # positions of other agents
 
     return features
@@ -308,7 +310,7 @@ def distance_map(ax, ay, arena):
         scanned[x, y] = True
 
         for dx, dy in [(-1, 0), (1, 0), (0, -1), (0, 1)]:
-            if arena[x + dx, y + dy] != -1:
+            if arena[x + dx, y + dy] == 0:  # changed != 1 to == 0 so that crates block the way too
                 # relax node
                 if d + 1 < dist[x + dx, y + dy]:
                     dist[x + dx, y + dy] = d + 1
@@ -317,26 +319,6 @@ def distance_map(ax, ay, arena):
                     heappush(pq, (d + 1, (x + dx, y + dy)))
 
     return dist, grad, crates
-
-
-def is_blocked(game_state: dict):
-    """Returns a vector of 4 values, for each direction whether it
-    is blocked by a wall, crate, agent, todo bomb or (imminent) explosion."""
-    _, _, _, (ax, ay) = game_state['self']
-    arena = game_state['field']
-    others = [(x, y) for _, _, _, (x, y) in game_state['others']]
-
-    directions = [(ax + 1, ay), (ax, ay + 1), (ax - 1, ay), (ax, ay - 1)]  # Right, Down, Left, Up
-    blocked = []
-
-    for (x, y) in directions:
-        if arena[x, y] == -1 or arena[x, y] == 1:
-            blocked.append(1)  # Blocked by a wall or crate
-        elif (x, y) in others:
-            blocked.append(1)  # Blocked by another agent
-        else:
-            blocked.append(0)  # The direction is not blocked
-    return np.array(blocked)
 
 
 def nearest_objects(dist, objects, k=1):
@@ -352,17 +334,21 @@ def nearest_objects(dist, objects, k=1):
     return objects
 
 
-def danger_map(game_state, dist):
+def danger_map(game_state):
     bombs = game_state['bombs']
-    explosion_map = game_state['explosion_map']
+    field = game_state['field']
+    explosion_map = np.copy(game_state['explosion_map'])
     explosion_radius = 3  # Bombs affect up to 3 fields in each direction
 
     for (bx, by), t in bombs:  # for every bomb
+        explosion_map[bx, by] = 1
         for dx, dy in [(-1, 0), (1, 0), (0, -1), (0, 1)]:  # in every direction
             for r in range(explosion_radius + 1):  # from 0 to 3
-                if dist[bx + r * dx, by + r * dy] == INF:  # explosion blocked by wall
-                    break
-                explosion_map[bx + r * dx, by + r * dy] = max(t + 3, explosion_map[bx + r * dx, by + r * dy])
+                x, y = bx + r * dx, by + r * dy
+                if 0 < x < 17 and 0 < y < 17:
+                    if field[x, y] == -1:  # Stop at walls
+                        break
+                    explosion_map[x, y] = 1
 
     return explosion_map
 
@@ -416,13 +402,35 @@ last_actions_deque = deque(maxlen=4)
 
 def last_k_actions():
     """
-    in theory, this should provide enough information to escape dropped bomb
-    :returns the last 4 actions. todo: one-hot
+    :returns the last 4 actions.
     """
     return list(last_actions_deque) + [4] * (last_actions_deque.maxlen - len(last_actions_deque))  # padded with WAIT
 
 
-def crates_reachable(x, y, field):
+def is_stuck():
+    """
+    returns 1 when the agent is repeating actions such that it is stuck in one location,
+    e.g. 4 times wait, left-right-left-right, up-down-up-down
+    """
+    # If fewer than 4 actions have been taken, it cannot be stuck
+    if len(last_actions_deque) < 4:
+        return 0
+
+    # Convert actions to a list for easier processing
+    actions = list(last_actions_deque)
+
+    # Check if all actions are WAIT
+    if actions.count(4) == 4:
+        return 1
+
+    # Check for patterns indicating the agent is stuck
+    if actions[0] == actions[2] and actions[1] == actions[3] and actions[0] != actions[1]:
+        return 1
+
+    return 0
+
+
+def crates_reachable(x, y, field):  # todo fix (returns values that are too low)
     """
     :param x: x position
     :param y: y position
@@ -515,34 +523,94 @@ def free_distance(ax, ay, field):
     return distances
 
 
-def nearest_safe_tile(game_state, dist, grad, in_danger):
+def nearest_safe_tile(field, explosion_map, dist, grad, in_danger):
     """Idea: when an agent finds itself in the explosion radius of a bomb, this should point the agent
     in the direction of the nearest safe tile, especially useful for avoiding placing a bomb and then
     walking in a dead end waiting for the bomb to blow up. Should also work for escaping enemy bombs."""
-    safe_tiles = []
-    explosion_map = danger_map(game_state, dist)
+
     if not in_danger:
         return [0, 0, 0, 0]
 
-    # Look for the nearest safe tile
-    for x in range(game_state['field'].shape[0]):
-        for y in range(game_state['field'].shape[1]):
-            if explosion_map[x, y] == 0 and dist[x, y] != INF:
-                safe_tiles.append((x, y))
+    directions = [dRIGHT, dDOWN, dLEFT, dUP]
+    distances = [15, 15, 15, 15]  # Default to 15 if no safe tile is found in a direction
 
-    if not safe_tiles:
-        return [0, 0, 0, 0]  # No safe tiles found
+    # Check for the nearest safe tile in each direction
+    for direction in directions:
+        for x in range(field.shape[0]):  # todo: do this more efficiently, searching the entire field 4 times is bad
+            for y in range(field.shape[1]):
+                if explosion_map[x, y] == 0 and dist[x, y] != INF:
+                    # Calculate the direction to this safe tile
+                    dir_to_tile = direction_to_object((x, y), grad)
+                    if dir_to_tile == direction:
+                        distance = dist[x, y]
+                        # Update the distance only if it's closer than the current one
+                        direction_index = directions.index(direction)
+                        distances[direction_index] = min(distances[direction_index], distance)
 
-    nearest_tile = nearest_objects(dist, safe_tiles)
-
-    direction = direction_to_object(nearest_tile, grad)
-
-    direction_one_hot = [
-        int(direction == dRIGHT),
-        int(direction == dDOWN),
-        int(direction == dLEFT),
-        int(direction == dUP),
-    ]
-    return direction_one_hot
+    return distances
 
 
+def disallowed_actions(game_state, dist, grad, nearest_safe):  # todo: make this more efficient
+    """
+    can be used as feature or to block those actions in the choose_action function
+    that would lead to certain death
+    """
+    disallowed = [0, 0, 0, 0, 0, 0]  # right down left up wait bomb
+    _, _, bomb_available, (ax, ay) = game_state['self']
+    disallowed[5] = int(
+        not bomb_available)  # Cannot bomb if it has no bomb. I have never seen the agent try to do that though
+
+    field = game_state['field']
+    explosion_map = danger_map(game_state)
+    bombs_list = game_state['bombs']
+    bombs = []
+    for bomb in bombs_list:
+        bombs.append(bomb[0])  # only the bomb coordinates
+    directions = [(ax + 1, ay), (ax, ay + 1), (ax - 1, ay), (ax, ay - 1)]  # Right, Down, Left, Up
+
+    if explosion_map[ax, ay] == 0:  # if not in explosion, do not walk into explosion (or wall)
+        for i, (dx, dy) in enumerate(directions):
+            if explosion_map[dx, dy] > 0 or field[dx, dy] != 0:  # Danger or obstacle ahead
+                disallowed[i] = 1
+
+    elif (ax, ay) in bombs:  # is standing on a bomb, bombs cannot be empty if this is the case
+        disallowed[4] = 1  # Disallow waiting on the bomb
+        for i, safe_dist in enumerate(nearest_safe):
+            if safe_dist > 4:  # it is a dead end and the agent would trap itself there
+                disallowed[i] = 1
+        for i, (dx, dy) in enumerate(directions):
+            if field[dx, dy] != 0:  # Danger or obstacle ahead
+                disallowed[i] = 1
+
+    else:  # is in imminent explosion zone, bombs cannot be empty if this is the case
+        disallowed[4] = 1  # do not wait
+        # get the bombs and only allow actions that move the agent away from them.
+        disallowed[0:4] = [1] * 4
+        for (bx, by) in bombs:
+            for i, (dx, dy) in enumerate(directions):
+                if abs(ax - bx) + abs(ay - by) < abs(dx - bx) + abs(dy - by) and field[dx, dy] == 0:
+                    disallowed[i] = 0  # allow if that direction brings more distance between the agent and the bomb
+
+    # disallow bomb placement if it would lead to certain death
+    if bomb_available:  # todo does not work 100% of the, fix
+        # Predict the danger level after placing a bomb
+        future_explosion_map = np.copy(explosion_map)
+        future_explosion_map[ax, ay] = 1  # Bomb placed on current position
+        for dx, dy in [(-1, 0), (1, 0), (0, -1), (0, 1)]:
+            for r in range(1, 4):
+                x, y = ax + r * dx, ay + r * dy
+                if 0 < x < 17 and 0 < y < 17:
+                    if field[x, y] == -1:  # Stop at walls
+                        break
+                    future_explosion_map[x, y] = 1
+                else:
+                    break
+
+        # calculate the future game state and check whether the agent could escape the bomb
+        future_nearest_safe = nearest_safe_tile(field, future_explosion_map, dist, grad, True)
+        if all(x > 4 for x in future_nearest_safe):  # try with 3, perhaps that fixes it
+            disallowed[5] = 1  # Disallow placing a bomb
+
+    # todo: disallow being stuck. take into account more complex stuck patterns such es left up down right left up...
+
+    return disallowed

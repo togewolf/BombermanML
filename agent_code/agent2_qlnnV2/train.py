@@ -11,6 +11,7 @@ ACTION_MAP = {action: idx for idx, action in enumerate(ACTIONS)}
 
 # Events
 MOVED_TOWARD_CRATE = 'MOVED_TOWARD_CRATE'  # todo
+IS_STUCK = "IS_STUCK"
 DROPPED_BOMB_THAT_CAN_DESTROY_CRATE = 'DROPPED_BOMB_THAT_CAN_DESTROY_CRATE'  # reward for each crate
 DROPPED_BOMB_NEXT_TO_CRATE = "DROPPED_BOMB_NEXT_TO_CRATE"
 DROPPED_BOMB_WHILE_ENEMY_NEAR = 'DROPPED_BOMB_WHILE_ENEMY_NEAR'  # todo reward for each enemy
@@ -56,8 +57,8 @@ def game_events_occurred(self, old_game_state: dict, self_action: str, new_game_
     if not old_game_state:
         return
 
-    old_features = state_to_features(old_game_state)
-    new_features = state_to_features(new_game_state)
+    old_features = state_to_features(old_game_state, self.logger)
+    new_features = state_to_features(new_game_state, self.logger)
 
     crate_count = old_features[1]
     self.logger.info("Crates reachable: " + str(crate_count))
@@ -82,7 +83,10 @@ def game_events_occurred(self, old_game_state: dict, self_action: str, new_game_
     if new_features[2] == 1:
         events.append(IS_IN_BOMB_EXPLOSION_RADIUS)
 
-    last_actions_deque.append(ACTION_MAP[self_action])
+    if new_features[3] == 1:
+        events.append(IS_STUCK)
+
+    self.logger.info("Disallowed actions: " + str(new_features[20:26]))
 
     self.model.store_transition(old_features, ACTION_MAP[self_action],
                                 reward_from_events(self, events), new_features, done=False)
@@ -99,7 +103,7 @@ def end_of_round(self, last_game_state: dict, last_action: str, events: List[str
     """
     self.logger.debug(f'Encountered event(s) {", ".join(map(repr, events))} in final step')
 
-    self.model.store_transition(state_to_features(last_game_state), ACTION_MAP[last_action],
+    self.model.store_transition(state_to_features(last_game_state, self.logger), ACTION_MAP[last_action],
                                 reward_from_events(self, events), None, done=True)
     self.model.learn(end_epoch=True)
 
@@ -126,25 +130,25 @@ def reward_from_events(self, events: List[str]) -> int:
     Here you can modify the rewards your agent get to en/discourage certain behavior.
     """
     game_rewards = {
-        e.MOVED_UP: -0.01,
-        e.MOVED_DOWN: -0.01,
-        e.MOVED_LEFT: -0.01,
-        e.MOVED_RIGHT: -0.01,
-        e.WAITED: -0.05,
+        e.MOVED_UP: -0.03,
+        e.MOVED_DOWN: -0.03,
+        e.MOVED_LEFT: -0.03,
+        e.MOVED_RIGHT: -0.03,
+        e.WAITED: -0.07,
         e.COIN_COLLECTED: 5,
         e.KILLED_OPPONENT: 5,
         e.KILLED_SELF: -15,
         e.GOT_KILLED: -5,
         e.INVALID_ACTION: -0.5,
         e.OPPONENT_ELIMINATED: 3,
-        e.SURVIVED_ROUND: 7.5,
-        e.BOMB_DROPPED: -0.5,
+        e.BOMB_DROPPED: -1,
         # MOVED_TOWARD_CRATE: 0.1,  # todo
         MOVED_IN_BLOCKED_DIRECTION: -0.5,
         DROPPED_BOMB_THAT_CAN_DESTROY_CRATE: 1,  # reward per crate that the bomb can reach
         # DROPPED_BOMB_WHILE_ENEMY_NEAR: 1,  # todo
         IS_IN_BOMB_EXPLOSION_RADIUS: -0.3,
-        WAITED_IN_EXPLOSION_RADIUS: -0.75
+        WAITED_IN_EXPLOSION_RADIUS: -0.75,
+        IS_STUCK: -0.75
     }
     reward_sum = sum(game_rewards[event] for event in events if event in game_rewards)
     self.logger.info(f"Awarded {reward_sum} for events {', '.join(events)}")
