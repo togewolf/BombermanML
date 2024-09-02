@@ -2,7 +2,7 @@ import pandas as pd
 import matplotlib.pyplot as plt
 import matplotlib.animation as animation
 
-def plot_scores(csv_file, miny, maxy, auto_update=False, update_interval=5000, smoothing_window=100, view_range=10000):
+def plot_scores(csv_file, miny, maxy, auto_update=False, update_interval=5000, smoothing_window=10, view_range=10000):
     scores = pd.read_csv(csv_file)
     scores_smooth = scores.rolling(window=smoothing_window).mean()
 
