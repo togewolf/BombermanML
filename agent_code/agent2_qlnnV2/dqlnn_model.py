@@ -124,7 +124,10 @@ class Agent:
                     p[i] = 0
 
             total_prob = np.sum(p)
-            p /= total_prob
+            if total_prob > 0:
+                p /= total_prob
+            else:
+                p = [.20, .20, .20, .20, .10, .10]
 
             action = random.choices(range(6), weights=p, k=1)[0]
             self.logger.info("Chose random action (Eps = " + str(self.epsilon) + ")")
