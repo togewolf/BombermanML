@@ -665,4 +665,5 @@ def enemies_distances_and_directions(dist, others, grad):
 
 # todo: - prevent agent getting stuck going back and forth
 #  - prevent agent from going into a dead end when an enemy can then place a bomb at the entrance or at least punish when that happens
-#  - the agent can still be killed by a rule_based agent. Why though?
+#  - the agent can still be killed by a rule_based agent. Why though? (unusual exposion configurations)
+#  - reward moving closer to enemies in the end (atm it flees)
