@@ -136,28 +136,28 @@ def reward_from_events(self, events: List[str]) -> int:
     certain behavior.
     """
     game_rewards = {
-        e.MOVED_UP: -0.01,
-        e.MOVED_DOWN: -0.01,
-        e.MOVED_LEFT: -0.01,
-        e.MOVED_RIGHT: -0.01,
+        e.MOVED_UP: 0,#-0.01,
+        e.MOVED_DOWN: 0,#-0.01,
+        e.MOVED_LEFT: 0,#-0.01,
+        e.MOVED_RIGHT: 0,#-0.01,
         e.WAITED: -0.3,
         e.COIN_COLLECTED: 5,
-        e.KILLED_OPPONENT: 5,
-        e.KILLED_SELF: -15,
-        e.COIN_FOUND: 1,  # Crate destroyed that contains coin
+        e.KILLED_OPPONENT: 0,#5,
+        e.KILLED_SELF: -5,#-15,
+        e.COIN_FOUND: 0,#1,  # Crate destroyed that contains coin
         e.GOT_KILLED: -5,
-        e.INVALID_ACTION: -0.5,
-        e.OPPONENT_ELIMINATED: 3,
-        e.SURVIVED_ROUND: 7.5,
-        e.BOMB_DROPPED: -0.5,
+        e.INVALID_ACTION: -0.3,#-0.5,
+        e.OPPONENT_ELIMINATED: 0,#3,
+        e.SURVIVED_ROUND: 0,#7.5,
+        e.BOMB_DROPPED: 0,#-0.5,
         MOVED_TOWARD_COIN: 0.3,
         MOVED_AWAY_FROM_COIN: -0.3,
         # MOVED_TOWARD_CRATE: 0.1,  # todo
-        MOVED_IN_BLOCKED_DIRECTION: -0.5,
+        MOVED_IN_BLOCKED_DIRECTION: 0,#-0.5,
         # DROPPED_BOMB_THAT_CAN_DESTROY_CRATE: 0.2,  # reward per crate that the bomb can reach  # todo
         # DROPPED_BOMB_WHILE_ENEMY_NEAR: 0.4,  # todo
-        IS_IN_BOMB_EXPLOSION_RADIUS: -0.5,
-        MOVED_BACK_AND_FORTH: -0.75
+        IS_IN_BOMB_EXPLOSION_RADIUS: 0,#-0.5,
+        MOVED_BACK_AND_FORTH: 0,#-0.75
     }
     reward_sum = 0
     for event in events:

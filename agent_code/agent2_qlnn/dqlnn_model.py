@@ -18,14 +18,19 @@ class DeepQNetwork(nn.Module):
         self.dropout = nn.Dropout(p=dropout_rate)
 
         self.conv = nn.ModuleList([
-            nn.Conv2d(5, 3, 3, 1, 1),
-            nn.Conv2d(3, 1, 3, 1, 1),
+            nn.Conv2d(input_dims[0], 16, 3, 1, 1),
+            nn.Conv2d(16, 8, 3, 1, 1),
+            nn.Conv2d(8, 4, 3, 1, 1),
         ])
 
         self.linear = nn.ModuleList([
-            nn.Linear(16, 8)
+            nn.Linear(1156, 2048),
+            nn.Linear(2048, 1024),
+            nn.Linear(1024, 512),
+            nn.Linear(512, 256),
+            nn.Linear(256, 12),
         ])
-        self.out = nn.Linear(8, output_dims)  # There are always six possible actions
+        self.out = nn.Linear(12, output_dims)  # There are always six possible actions
 
         self.optimizer = optim.Adam(self.parameters(), lr=lr)                   # see https://pytorch.org/docs/stable/optim.html#algorithms
         self.scheduler = scheduler.ExponentialLR(self.optimizer, gamma=0.98)    # see https://pytorch.org/docs/stable/optim.html#how-to-adjust-learning-rate
@@ -40,7 +45,7 @@ class DeepQNetwork(nn.Module):
         x = state
         for conv in self.conv:
             x = f.relu(conv(x))
-            x = self.pool(x)
+            #x = self.pool(x)
 
         x = x.reshape(x.shape[0], -1)
         for lin in self.linear:
@@ -53,7 +58,7 @@ class DeepQNetwork(nn.Module):
 
 
 class Agent:
-    def __init__(self, logger, gamma, epsilon, lr, batch_size, input_dims=(5, 17, 17), output_dims=6, max_mem_size=100000, eps_end=0.1,
+    def __init__(self, logger, gamma, epsilon, lr, batch_size, input_dims=(9, 17, 17), output_dims=6, max_mem_size=100000, eps_end=0.1,
                  eps_dec=1e-2):
         self.logger = logger
         self.gamma = gamma
@@ -92,7 +97,7 @@ class Agent:
         features = state_to_features(game_state)
 
         if np.random.random() > self.epsilon or not train:
-            state = torch.tensor(np.array(features), dtype=torch.float32).to(self.Q_eval.device)
+            state = torch.tensor(np.array([features]), dtype=torch.float32).to(self.Q_eval.device)
             actions = self.Q_eval.forward(state, train).squeeze()
 
             action = torch.argmax(actions).item()
@@ -186,39 +191,33 @@ def state_to_features(game_state: dict) -> np.array:
     _, _, bomb_available, (ax, ay) = game_state['self']
     others = [(x, y) for _, _, _, (x, y) in game_state['others']]
     arena = game_state['field']
-    coins = game_state['coins'] # [(x, y)]
-    bombs = game_state['bombs'] # [(x, y), countdown]
-    explosion_map = game_state['explosion_map']
 
-    dist, grad, crates = distance_map(ax, ay, arena)
+    dist, grad, direction, crates = distance_map(ax, ay, arena)
+    up, down, left, right = onehot_encode_direction(direction)
+    coins = coin_map(game_state['coins'], arena)
     players = player_map(ax, ay, others, arena)
-    danger = danger_map(bombs, explosion_map, dist)
+    danger = danger_map(game_state['bombs'], game_state['explosion_map'], dist)
 
     features.append(dist)
-    features.append(grad)
+    features.append(up)
+    features.append(down)
+    features.append(left)
+    features.append(right)
     features.append(crates)
+    features.append(coins)
     features.append(players)
     features.append(danger)
 
-    #print("Maps:")
+    #print('\n')
     #print(dist)
+    #print(direction)
     #print(grad)
     #print(crates)
+    #print(coins)
     #print(players)
     #print(danger)
 
     #features.append(int(bomb_available))
-
-    # nearest_coins = nearest_objects(dist, coins, k=1)
-    # for coin in nearest_coins:
-    #     direction = direction_to_object(coin, grad)
-    #     direction_one_hot = [
-    #         float(direction == dRIGHT),
-    #         float(direction == dDOWN),
-    #         float(direction == dLEFT),
-    #         float(direction == dUP),
-    #     ]
-    #     features.extend([x / dist[coin[0], coin[1]] for x in direction_one_hot])
 
     #features.extend(last_k_actions())
 
@@ -231,6 +230,12 @@ def distance_map(ax, ay, arena):
     scanned = np.full_like(arena, False)
 
     crates = np.full_like(arena, INF)
+
+    direction = np.full_like(arena, dNONE)
+    direction[ax, ay + 1] = dDOWN
+    direction[ax, ay - 1] = dUP
+    direction[ax + 1, ay] = dLEFT
+    direction[ax - 1, ay] = dRIGHT
 
     dist[ax, ay] = 0
     crates[ax, ay] = 0
@@ -251,13 +256,19 @@ def distance_map(ax, ay, arena):
                 if d + 1 < dist[x+dx, y+dy]:
                     dist[x+dx, y+dy] = d + 1
                     grad[x+dx, y+dy] = -dx - 2*dy
+                    direction[x+dx, y+dy] = direction[x, y]
                     crates[x+dx, y+dy] = crates[x, y] + arena[x+dx, y+dy]
                     heappush(pq, (d + 1, (x+dx, y+dy)))
 
-    return dist, grad, crates
+    return dist, grad, direction, crates
 
-def direction_map(grad):
-    pass #todo
+def onehot_encode_direction(direction):
+    up = [[int(d == dUP) for d in line] for line in direction]
+    down = [[int(d == dDOWN) for d in line] for line in direction]
+    left = [[int(d == dLEFT) for d in line] for line in direction]
+    right = [[int(d == dRIGHT) for d in line] for line in direction]
+
+    return up, down, left, right
 
 # Follow gradient to agent, to determine path
 def direction_to_object(obj, grad):
@@ -308,6 +319,14 @@ def player_map(ax, ay, others, arena):
         players[x, y] = -1
 
     return players
+
+def coin_map(coins, arena):
+    map = np.full_like(arena, 0)
+    for (x, y) in coins:
+        map[x, y] = 1
+
+    return map
+
 
 last_actions_deque = deque(maxlen=4)
 def last_k_actions():
