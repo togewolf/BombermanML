@@ -74,6 +74,19 @@ def game_events_occurred(self, old_game_state: dict, self_action: str, new_game_
             for i in range(crate_count):
                 events.append(DROPPED_BOMB_THAT_CAN_DESTROY_CRATE)
 
+        others = old_game_state['others']
+        others = [t[3] for t in others]
+        _, _, _, (ax, ay) = old_game_state['self']
+        if len(others):
+            for (ox, oy) in others:
+                if abs(ax - ox) + abs(ay - oy) < 4:
+                    events.append(DROPPED_BOMB_WHILE_ENEMY_NEAR)
+                    if abs(ax - ox) + abs(ay - oy) < 3:
+                        events.append(DROPPED_BOMB_WHILE_ENEMY_NEAR)
+                        if abs(ax - ox) + abs(ay - oy) < 2:
+                            events.append(
+                                DROPPED_BOMB_WHILE_ENEMY_NEAR)  # higher reward for dropping bombs closer to enemies.
+
     if new_features[2] == 1:
         events.append(IS_IN_BOMB_EXPLOSION_RADIUS)
 
@@ -90,7 +103,7 @@ def game_events_occurred(self, old_game_state: dict, self_action: str, new_game_
     self.logger.info("Disallowed actions: " + str(new_features[20:26]))
 
     self.model.store_transition(old_features, ACTION_MAP[self_action],
-                                reward_from_events(self, events, crates_left), new_features, done=False)
+                                reward_from_events(self, events), new_features, done=False)
     self.model.learn()
 
 
@@ -126,7 +139,7 @@ def end_of_round(self, last_game_state: dict, last_action: str, events: List[str
         pickle.dump(self.model, file)
 
 
-def reward_from_events(self, events: List[str], crates_left=0) -> int:
+def reward_from_events(self, events: List[str]) -> int:
     """
     Here you can modify the rewards your agent get to en/discourage certain behavior.
     """
@@ -137,14 +150,14 @@ def reward_from_events(self, events: List[str], crates_left=0) -> int:
         e.MOVED_RIGHT: -0.1,
         e.WAITED: -0.2,
         e.COIN_COLLECTED: 5,
-        e.KILLED_OPPONENT: 5,
+        e.KILLED_OPPONENT: 10,
         e.KILLED_SELF: -15,
         e.GOT_KILLED: -5,
         e.INVALID_ACTION: -1,
         e.OPPONENT_ELIMINATED: 5,
         e.BOMB_DROPPED: -1.5,
         DROPPED_BOMB_THAT_CAN_DESTROY_CRATE: 0.5,  # reward per crate that the bomb can reach
-        # DROPPED_BOMB_WHILE_ENEMY_NEAR: 1,  # todo
+        DROPPED_BOMB_WHILE_ENEMY_NEAR: 2,
         IS_STUCK: -0.75,
         MOVED_TOWARD_CRATE: 0.2,
         DROPPED_BOMB_NEXT_TO_CRATE: 1.5

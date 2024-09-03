@@ -73,8 +73,8 @@ class Agent:
         self.mem_size = max_mem_size
         self.batch_size = batch_size
 
-        self.Q_eval = DeepQNetwork(self.lr, input_dims=input_dims, l1_dims=4096, l2_dims=2048,
-                                   l3_dims=2048, l4_dims=8)  # experiment here
+        self.Q_eval = DeepQNetwork(self.lr, input_dims=input_dims, l1_dims=2 ** 11, l2_dims=2 ** 10,
+                                   l3_dims=2 ** 10, l4_dims=2048)  # experiment here
 
         self.state_memory = np.zeros((self.mem_size, input_dims), dtype=np.float32)
         self.new_state_memory = np.zeros((self.mem_size, input_dims), dtype=np.float32)
@@ -124,7 +124,11 @@ class Agent:
                     p[i] = 0
 
             total_prob = np.sum(p)
-            p /= total_prob
+            if total_prob > 0:
+                p /= total_prob
+            else:
+                p = [.20, .20, .20, .20, .10, .10]
+                self.logger.info("All actions disallowed!")
 
             action = random.choices(range(6), weights=p, k=1)[0]
             self.logger.info("Chose random action (Eps = " + str(self.epsilon) + ")")
@@ -206,18 +210,22 @@ def state_to_features(game_state: dict, logger) -> np.array:
     coins = game_state['coins']  # [(x, y)]
     crates = np.argwhere(field == 1)
     crates = [tuple(pos) for pos in crates]  # so they are in the same format as the coins
-    # bombs = game_state['bombs']  # [(x, y), countdown]
+    bombs = game_state['bombs']  # [(x, y), countdown]
+    bombs = [b[0] for b in bombs]
+    others = game_state['others']
+    others = [t[3] for t in others]
     dist, grad, crate_map = distance_map(ax, ay, field)
     danger_zone = danger_map(game_state)
     in_danger = False
     if danger_zone[ax, ay] == 1:
         in_danger = True
-    nearest_safe = nearest_safe_tile(ax, ay, danger_zone, dist, grad, in_danger)
+    nearest_safe = nearest_safe_tile(ax, ay, danger_zone, others, bombs, dist, grad, in_danger)
     # logger.info("In danger: " + str(in_danger))
     # logger.info(danger_zone)
     # logger.info("Distances to nearest safe tiles: " + str(nearest_safe))
     # logger.info("Distance map: ")
     # logger.info(dist)
+    logger.info("Enemies distances: " +str(enemies_distances_and_directions(dist, others, grad)))
 
     # features
     features.append(int(bomb_available))  # feat 0
@@ -228,17 +236,18 @@ def state_to_features(game_state: dict, logger) -> np.array:
     features.extend(nearest_crate_feature(field, dist, crates, grad, k=1))  # feat 8-11
     features.extend(free_distance(ax, ay, field))  # 12-15
     features.extend(nearest_safe)  # 16-19
-    features.extend(disallowed_actions(game_state, dist, grad, nearest_safe))  # 20-25
+    features.extend(disallowed_actions(game_state, danger_zone, others, bombs, dist, grad, nearest_safe))  # 20-25
     features.append(float(len(crates) / 135))  # 26 How many crates are left represented as a float between 0 and 1
+    features.append(
+        float(game_state['round'] * len(others)) / 400)  # 27 Idea: learn to become more aggressive toward the end
+    features.extend(enemies_distances_and_directions(dist, others, grad))  # 28-39
     # features.extend(neighboring(ax, ay, game_state))  # 26-51  # todo perhaps a separate convolutional subnetwork for th
     #  is
     # features.extend(last_k_actions())  # 50-53
-    # aggressiveness: features.append(step * others.shape[0])
     # add all further features with their sizes in one line like this for clarity
 
     # todo:
     # bomb positions
-    # positions of other agents
 
     return features
 
@@ -529,7 +538,7 @@ def free_distance(ax, ay, field):
     return distances
 
 
-def nearest_safe_tile(ax, ay, explosion_map, dist, grad, in_danger):
+def nearest_safe_tile(ax, ay, explosion_map, others, bombs, dist, grad, in_danger):
     """Idea: when an agent finds itself in the explosion radius of a bomb, this should point the agent
     in the direction of the nearest safe tile, especially useful for avoiding placing a bomb and then
     walking in a dead end waiting for the bomb to blow up. Should also work for escaping enemy bombs."""
@@ -539,7 +548,7 @@ def nearest_safe_tile(ax, ay, explosion_map, dist, grad, in_danger):
 
     directions = [dRIGHT, dDOWN, dLEFT, dUP]
     distances = [15, 15, 15, 15]  # Default to 15 if no safe tile is found in a direction
-    radius = 4  # Limit the search to a radius of 4 tiles around the agent for efficiency
+    radius = 5  # Limit the search to a radius of 5 tiles around the agent for efficiency
 
     # Define the search boundaries to ensure they are within the field limits
     x_min = max(1, ax - radius)
@@ -551,7 +560,7 @@ def nearest_safe_tile(ax, ay, explosion_map, dist, grad, in_danger):
     for direction in directions:
         for x in range(x_min, x_max):
             for y in range(y_min, y_max):
-                if explosion_map[x, y] == 0 and dist[x, y] != INF:
+                if explosion_map[x, y] == 0 and dist[x, y] != INF and (x, y) not in others and (x, y) not in bombs:
                     # Calculate the direction to this safe tile
                     dir_to_tile = direction_to_object((x, y), grad)
                     if dir_to_tile == direction:
@@ -563,8 +572,8 @@ def nearest_safe_tile(ax, ay, explosion_map, dist, grad, in_danger):
     return distances
 
 
-def disallowed_actions(game_state, dist, grad,
-                       nearest_safe):  # todo: make this more efficient, fix that in very rare cases all actions are disallowed
+def disallowed_actions(game_state, explosion_map, others, bombs, dist, grad, nearest_safe):
+    # todo: make this more efficient, fix that in very rare cases all actions are disallowed
     """
     can be used as feature or to block those actions in the choose_action function
     that would lead to certain death
@@ -575,7 +584,6 @@ def disallowed_actions(game_state, dist, grad,
         not bomb_available)  # Cannot bomb if it has no bomb. I have never seen the agent try to do that though
 
     field = game_state['field']
-    explosion_map = danger_map(game_state)
     bombs_list = game_state['bombs']
     bombs = []
     for bomb in bombs_list:
@@ -621,10 +629,40 @@ def disallowed_actions(game_state, dist, grad,
                     break
 
         # calculate the future game state and check whether the agent could escape the bomb
-        future_nearest_safe = nearest_safe_tile(ax, ay, future_explosion_map, dist, grad, True)
+        future_nearest_safe = nearest_safe_tile(ax, ay, future_explosion_map, others, bombs, dist, grad, True)
         if all(x > 4 for x in future_nearest_safe):  # try with 3, perhaps that fixes it
             disallowed[5] = 1  # Disallow placing a bomb
 
     # todo: disallow being stuck. take into account more complex stuck patterns such es left up down right left up...
 
     return disallowed
+
+
+def enemies_distances_and_directions(dist, others, grad):
+    """
+    :returns the direction to the nearest enemies as one-hot, an array of length 12.
+    """
+
+    features = []
+    max_dist = np.sqrt(
+        30)  # Max distance value to be used in the features, the high INF value for the distances "confuses" the model
+
+    for other in others[:3]:  # Limit to the first 3 enemies
+        direction = direction_to_object(other, grad)
+        direction_one_hot = [
+            int(direction == dRIGHT) * min(np.sqrt(dist[other]), max_dist),
+            int(direction == dDOWN) * min(np.sqrt(dist[other]), max_dist),
+            int(direction == dLEFT) * min(np.sqrt(dist[other]), max_dist),
+            int(direction == dUP) * min(np.sqrt(dist[other]), max_dist),
+        ]
+        features.extend(direction_one_hot)
+
+    # Pad with zeros if there are fewer than 3 enemies
+    while len(features) < 12:
+        features.extend([0, 0, 0, 0])
+
+    return features
+
+# todo: - prevent agent getting stuck going back and forth
+#  - prevent agent from going into a dead end when an enemy can then place a bomb at the entrance or at least punish when that happens
+#  - the agent can still be killed by a rule_based agent. Why though?
