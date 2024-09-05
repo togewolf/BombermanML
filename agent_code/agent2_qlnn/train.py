@@ -67,10 +67,10 @@ def game_events_occurred(self, old_game_state: dict, self_action: str, new_game_
     _, _, _, (x2, y2) = new_game_state['self']
     new_position = (x2, y2)
 
-    old_coin = nearest_objects(old_features[0], old_game_state['coins'])
-    new_coin = nearest_objects(new_features[0], new_game_state['coins'])
+    old_coin = nearest_objects(old_features['conv_features'][0], old_game_state['coins'])
+    new_coin = nearest_objects(new_features['conv_features'][0], new_game_state['coins'])
 
-    if old_features[0][old_coin[0][0], old_coin[0][1]] > new_features[0][new_coin[0][0], new_coin[0][1]]:
+    if old_features['conv_features'][0][old_coin[0][0], old_coin[0][1]] > new_features['conv_features'][0][new_coin[0][0], new_coin[0][1]]:
        events.append(MOVED_TOWARD_COIN)
     else:
        events.append(MOVED_AWAY_FROM_COIN)

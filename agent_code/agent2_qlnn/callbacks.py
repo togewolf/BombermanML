@@ -1,7 +1,7 @@
 import os
 import pickle
 from collections import deque
-from .dqlnn_model import Agent
+from .dqlnn_model import Agent, state_to_features
 
 ACTIONS = ['RIGHT', 'DOWN', 'LEFT', 'UP', 'WAIT', 'BOMB']
 
@@ -30,7 +30,7 @@ def setup(self):
 
     if not os.path.isfile(model_filename):
         self.logger.info("Setting up model from scratch.")
-        self.model = Agent(self.logger, gamma=0.9, epsilon=1.0, lr=1e-4, batch_size=64)
+        self.model = Agent(self.logger)
 
     else:
         self.logger.info("Loading model from saved state.")
@@ -47,6 +47,6 @@ def act(self, game_state: dict) -> str:
     :param game_state: The dictionary that describes everything on the board.
     :return: The action to take as a string.
     """
-    action = self.model.choose_action(game_state, self.train)
+    action = self.model.choose_action(state_to_features(game_state), self.train)
     self.logger.info("Action: " + ACTIONS[action])
     return ACTIONS[action]

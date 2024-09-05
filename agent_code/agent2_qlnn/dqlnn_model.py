@@ -8,9 +8,11 @@ from collections import deque
 import random
 from heapq import heapify, heappop, heappush
 
+from sympy.codegen.cnodes import sizeof
+
 
 class DeepQNetwork(nn.Module):
-    def __init__(self, lr, input_dims, output_dims, dropout_rate=0.3):
+    def __init__(self, lr, dims, dropout_rate=0.3):
         super(DeepQNetwork, self).__init__()
         # torch.autograd.set_detect_anomaly(True)  # remove when it works
 
@@ -18,19 +20,19 @@ class DeepQNetwork(nn.Module):
         self.dropout = nn.Dropout(p=dropout_rate)
 
         self.conv = nn.ModuleList([
-            nn.Conv2d(input_dims[0], 16, 3, 1, 1),
+            nn.Conv2d(dims['channels'], 16, 3, 1, 1),
             nn.Conv2d(16, 8, 3, 1, 1),
             nn.Conv2d(8, 4, 3, 1, 1),
         ])
 
         self.linear = nn.ModuleList([
-            nn.Linear(1156, 2048),
+            nn.Linear(1157, 2048),
             nn.Linear(2048, 1024),
             nn.Linear(1024, 512),
             nn.Linear(512, 256),
             nn.Linear(256, 12),
         ])
-        self.out = nn.Linear(12, output_dims)  # There are always six possible actions
+        self.out = nn.Linear(12, dims['out'])  # There are always six possible actions
 
         self.optimizer = optim.Adam(self.parameters(), lr=lr)                   # see https://pytorch.org/docs/stable/optim.html#algorithms
         self.scheduler = scheduler.ExponentialLR(self.optimizer, gamma=0.98)    # see https://pytorch.org/docs/stable/optim.html#how-to-adjust-learning-rate
@@ -42,12 +44,14 @@ class DeepQNetwork(nn.Module):
         self.to(self.device)
 
     def forward(self, state, train):
-        x = state
+        x = state['conv_features']
         for conv in self.conv:
             x = f.relu(conv(x))
             #x = self.pool(x)
 
         x = x.reshape(x.shape[0], -1)
+        x = torch.cat((x, state['lin_features']), 1)
+
         for lin in self.linear:
             x = f.relu(lin(x))
             if train:
@@ -58,8 +62,8 @@ class DeepQNetwork(nn.Module):
 
 
 class Agent:
-    def __init__(self, logger, gamma, epsilon, lr, batch_size, input_dims=(9, 17, 17), output_dims=6, max_mem_size=100000, eps_end=0.1,
-                 eps_dec=1e-2):
+    def __init__(self, logger, gamma=0.9, lr=1e-4, epsilon=1.0, eps_end=0.1, eps_dec=1e-2,
+                 batch_size=64, symmetries=8, dims={'channels': 9,'height': 17, 'width': 17, 'linear': 1, 'out': 6}, max_mem_size=100000):
         self.logger = logger
         self.gamma = gamma
         self.epsilon = epsilon
@@ -68,11 +72,18 @@ class Agent:
         self.lr = lr
         self.mem_size = max_mem_size
         self.batch_size = batch_size
+        self.symmetries = symmetries
 
-        self.Q_eval = DeepQNetwork(self.lr, input_dims, output_dims)
+        self.Q_eval = DeepQNetwork(self.lr, dims)
 
-        self.state_memory = np.zeros((self.mem_size, input_dims[0], input_dims[1], input_dims[2]), dtype=np.float32)
-        self.new_state_memory = np.zeros((self.mem_size, input_dims[0], input_dims[1], input_dims[2]), dtype=np.float32)
+        self.state_memory = {
+            'conv_features': np.zeros((self.mem_size, self.symmetries, dims['channels'], dims['height'], dims['width']), dtype=np.float32),
+            'lin_features': np.zeros((self.mem_size, self.symmetries, dims['linear']), dtype=np.float32),
+        }
+        self.new_state_memory = {
+            'conv_features': np.zeros((self.mem_size, self.symmetries, dims['channels'], dims['height'], dims['width']), dtype=np.float32),
+            'lin_features': np.zeros((self.mem_size, self.symmetries, dims['linear']), dtype=np.float32),
+        }
         self.action_memory = np.zeros(self.mem_size, dtype=np.int32)
         self.reward_memory = np.zeros(self.mem_size, dtype=np.float32)
         self.terminal_memory = np.zeros(self.mem_size, dtype=bool)
@@ -81,23 +92,23 @@ class Agent:
         self.iteration = 0
         self.epoch = 0
 
-    def store_transition(self, state, action, reward, state_, done):  # state means features here
+    def store_transition(self, state, action, reward, new_state, done):  # state means features here
         index = self.mem_cntr % self.mem_size
-        self.state_memory[index] = state
-        if state_ is not None:
-            self.new_state_memory[index] = state_
-        else:
-            self.new_state_memory[index] = state
+
+        self.state_memory['conv_features', index], self.state_memory['lin_features', index] = state_symmetries(state)
+        self.new_state_memory['conv_features', index], self.new_state_memory['lin_features', index] = state_symmetries(new_state) if new_state is not None else state_symmetries(state)
         self.reward_memory[index] = reward
         self.action_memory[index] = action
         self.terminal_memory[index] = done
         self.mem_cntr += 1
 
-    def choose_action(self, game_state, train):
-        features = state_to_features(game_state)
+    def choose_action(self, state, train):
 
         if np.random.random() > self.epsilon or not train:
-            state = torch.tensor(np.array([features]), dtype=torch.float32).to(self.Q_eval.device)
+            state = {
+                'conv_features': torch.tensor(np.array([state['conv_features']]), dtype=torch.float32).to(self.Q_eval.device),
+                'lin_features': torch.tensor(np.array([state['lin_features']]), dtype=torch.float32).to(self.Q_eval.device),
+            }
             actions = self.Q_eval.forward(state, train).squeeze()
 
             action = torch.argmax(actions).item()
@@ -128,8 +139,16 @@ class Agent:
 
         batch_index = np.arange(self.batch_size, dtype=np.int32)
 
-        state_batch = torch.tensor(self.state_memory[batch]).to(self.Q_eval.device)
-        new_state_batch = torch.tensor(self.new_state_memory[batch]).to(self.Q_eval.device)
+        sym = np.random.choice(range(self.symmetries))
+
+        state_batch = {
+            'conv_features': torch.tensor(self.state_memory['conv_features'][batch, sym]).to(self.Q_eval.device),
+            'lin_features': torch.tensor(self.state_memory['lin_features'][batch, sym]).to(self.Q_eval.device),
+        }
+        new_state_batch = {
+            'conv_features': torch.tensor(self.new_state_memory['conv_features'][batch, sym]).to(self.Q_eval.device),
+            'lin_features': torch.tensor(self.new_state_memory['lin_features'][batch, sym]).to(self.Q_eval.device),
+        }
         reward_batch = torch.tensor(self.reward_memory[batch]).to(self.Q_eval.device)
         terminal_batch = torch.tensor(self.terminal_memory[batch]).to(self.Q_eval.device)
 
@@ -159,12 +178,82 @@ class Agent:
 
 # followed https://www.youtube.com/watch?v=wc-FxNENg9U
 
+def state_symmetries(state):
+    conv_features = []
+    for feature in state['conv_features']:
+        symmetries = [ # see https://www2.math.upenn.edu/~kazdan/202F13/notes/symmetries-square.pdf
+            feature,                            # I
+            np.rot90(feature, k=1),             # R
+            np.rot90(feature, k=2),             # R2
+            np.rot90(feature, k=-1),            # R3
+            np.fliplr(feature),                 # S
+            np.fliplr(np.rot90(feature, k=1)),  # SR
+            np.flipud(feature),                 # SR2
+            np.flipud(np.rot90(feature, k=1)),  # SR3
+        ]
+        conv_features.append(symmetries)
+
+    lin_features = []
+    dir_mask = [False, True]
+    for idx, feature in enumerate(state['lin_features']):
+        if dir_mask[idx]:
+            symmetries = [
+                feature,                        # I
+                rot90(feature, k=1),            # R
+                rot90(feature, k=2),            # R2
+                rot90(feature, k=-1),           # R3
+                fliplr(feature),                # S
+                fliplr(rot90(feature, k=1)),    # SR
+                flipud(feature),                # SR2
+                flipud(rot90(feature, k=1)),    # SR3
+            ]
+        else:
+            symmetries = [feature] * 8
+
+        lin_features.append(symmetries)
+
+    conv_features = np.swapaxes(np.array(conv_features), 0, 1)
+    lin_features = np.swapaxes(np.array(lin_features), 0, 1)
+
+    return conv_features, lin_features
+
 # Direction Mapping: invert direction by multiplying with -1
 dUP = -2
 dLEFT = -1
 dNONE = 0
 dRIGHT = 1
 dDOWN = 2
+
+def rot90(direction, k=1):
+    for i in range(k % 4):
+        if direction == dUP:
+            direction = dRIGHT
+        elif direction == dRIGHT:
+            direction = dDOWN
+        elif direction == dDOWN:
+            direction = dLEFT
+        elif direction == dLEFT:
+            direction = dUP
+        else:
+            return dNONE
+
+    return direction
+
+def fliplr(direction):
+    if direction == dLEFT:
+        return dRIGHT
+    elif direction == dRIGHT:
+        return dLEFT
+    else:
+        return direction
+
+def flipud(direction):
+    if direction == dUP:
+        return dDOWN
+    elif direction == dDOWN:
+        return dUP
+    else:
+        return direction
 
 INF = 999 # 999 represents infinity
 
@@ -186,7 +275,8 @@ def state_to_features(game_state: dict) -> np.array:
     if game_state is None:
         return None
 
-    features = []
+    conv_features = []
+    lin_features = []
 
     _, _, bomb_available, (ax, ay) = game_state['self']
     others = [(x, y) for _, _, _, (x, y) in game_state['others']]
@@ -198,30 +288,20 @@ def state_to_features(game_state: dict) -> np.array:
     players = player_map(ax, ay, others, arena)
     danger = danger_map(game_state['bombs'], game_state['explosion_map'], dist)
 
-    features.append(dist)
-    features.append(up)
-    features.append(down)
-    features.append(left)
-    features.append(right)
-    features.append(crates)
-    features.append(coins)
-    features.append(players)
-    features.append(danger)
+    conv_features.append(dist)
+    #conv_features.append(up)
+    #conv_features.append(down)
+    #conv_features.append(left)
+    #conv_features.append(right)
+    #conv_features.append(crates)
+    #conv_features.append(coins)
+    #conv_features.append(players)
+    #conv_features.append(danger)
 
-    #print('\n')
-    #print(dist)
-    #print(direction)
-    #print(grad)
-    #print(crates)
-    #print(coins)
-    #print(players)
-    #print(danger)
+    lin_features.append(int(bomb_available))
+    #lin_features.extend(last_k_actions())
 
-    #features.append(int(bomb_available))
-
-    #features.extend(last_k_actions())
-
-    return np.array(features)
+    return {'conv_features': conv_features, 'lin_features': lin_features}
 
 # Use Dijkstra to calculate distance to every position and corresponding gradient
 def distance_map(ax, ay, arena):
