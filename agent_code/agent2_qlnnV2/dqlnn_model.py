@@ -10,7 +10,7 @@ from heapq import heapify, heappop, heappush
 
 
 class DeepQNetwork(nn.Module):
-    def __init__(self, lr, input_dims, l1_dims, l2_dims, l3_dims, l4_dims, dropout_rate=0.2):
+    def __init__(self, lr, input_dims, l1_dims, l2_dims, l3_dims, l4_dims, l5_dims, dropout_rate=0.2):
         super(DeepQNetwork, self).__init__()
         # torch.autograd.set_detect_anomaly(True)  # remove when it works
         self.input_dims = input_dims
@@ -18,6 +18,7 @@ class DeepQNetwork(nn.Module):
         self.l2_dims = l2_dims
         self.l3_dims = l3_dims
         self.l4_dims = l4_dims
+        self.l5_dims = l5_dims
 
         self.l1 = nn.Linear(self.input_dims, self.l1_dims)
         self.dropout1 = nn.Dropout(p=dropout_rate)
@@ -25,9 +26,11 @@ class DeepQNetwork(nn.Module):
         self.dropout2 = nn.Dropout(p=dropout_rate)
         self.l3 = nn.Linear(self.l2_dims, self.l3_dims)
         self.dropout3 = nn.Dropout(p=dropout_rate)
-        # self.l4 = nn.Linear(self.l3_dims, self.l4_dims)
-        # self.dropout4 = nn.Dropout(p=dropout_rate)
-        self.lo = nn.Linear(self.l3_dims, 6)  # There are always six possible actions
+        self.l4 = nn.Linear(self.l3_dims, self.l4_dims)
+        self.dropout4 = nn.Dropout(p=dropout_rate)
+        self.l5 = nn.Linear(self.l4_dims, self.l5_dims)
+        self.dropout5 = nn.Dropout(p=dropout_rate)
+        self.lo = nn.Linear(self.l5_dims, 6)  # There are always six possible actions
 
         # Optimizer (see https://pytorch.org/docs/stable/optim.html#algorithms)
         self.optimizer = optim.Adam(self.parameters(), lr=lr)
@@ -52,9 +55,12 @@ class DeepQNetwork(nn.Module):
         x = f.relu(self.l3(x))
         if train:
             x = self.dropout3(x)
-        # x = f.relu(self.l4(x))
-        # if train:
-        #    x = self.dropout4(x)
+        x = f.relu(self.l4(x))
+        if train:
+            x = self.dropout4(x)
+        x = f.relu(self.l5(x))
+        if train:
+            x = self.dropout5(x)
         actions = self.lo(x)
         # actions_prob = torch.sigmoid_(actions)
         # softmax/sigmoid causes really weird errors here
@@ -73,8 +79,8 @@ class Agent:
         self.mem_size = max_mem_size
         self.batch_size = batch_size
 
-        self.Q_eval = DeepQNetwork(self.lr, input_dims=input_dims, l1_dims=2 ** 11, l2_dims=2 ** 10,
-                                   l3_dims=2 ** 10, l4_dims=2048)  # experiment here
+        self.Q_eval = DeepQNetwork(self.lr, input_dims=input_dims, l1_dims=2 ** 7, l2_dims=2 ** 8,
+                                   l3_dims=2 ** 7, l4_dims=2 ** 8, l5_dims=2 ** 7)  # experiment here
 
         self.state_memory = np.zeros((self.mem_size, input_dims), dtype=np.float32)
         self.new_state_memory = np.zeros((self.mem_size, input_dims), dtype=np.float32)
@@ -87,7 +93,6 @@ class Agent:
         self.epoch = 0
 
     def store_transition(self, features, action, reward, state_, done):
-        # todo: data augmentation for faster training, if needed
         index = self.mem_cntr % self.mem_size
         self.state_memory[index] = features
         if state_ is not None:
@@ -220,12 +225,16 @@ def state_to_features(game_state: dict, logger) -> np.array:
     if danger_zone[ax, ay] == 1:
         in_danger = True
     nearest_safe = nearest_safe_tile(ax, ay, danger_zone, others, bombs, dist, grad, in_danger)
+    dead_ends = dead_end_map(field)
     # logger.info("In danger: " + str(in_danger))
     # logger.info(danger_zone)
     # logger.info("Distances to nearest safe tiles: " + str(nearest_safe))
     # logger.info("Distance map: ")
     # logger.info(dist)
-    logger.info("Enemies distances: " +str(enemies_distances_and_directions(dist, others, grad)))
+    # logger.info("Enemies distances: " +str(enemies_distances_and_directions(dist, others, grad)))
+    # logger.info("is at crossing: " + str(is_at_crossing(ax, ay)))
+    # logger.info(field)
+    # logger.info(dead_ends)
 
     # features
     features.append(int(bomb_available))  # feat 0
@@ -241,13 +250,13 @@ def state_to_features(game_state: dict, logger) -> np.array:
     features.append(
         float(game_state['round'] * len(others)) / 400)  # 27 Idea: learn to become more aggressive toward the end
     features.extend(enemies_distances_and_directions(dist, others, grad))  # 28-39
+    features.append(is_at_crossing(ax, ay))  # 40
+    features.extend(last_action())  # 41-46
+    features.extend(direction_to_enemy_in_dead_end(dead_ends, others, dist, grad))  # 47-52
     # features.extend(neighboring(ax, ay, game_state))  # 26-51  # todo perhaps a separate convolutional subnetwork for th
     #  is
     # features.extend(last_k_actions())  # 50-53
     # add all further features with their sizes in one line like this for clarity
-
-    # todo:
-    # bomb positions
 
     return features
 
@@ -428,6 +437,16 @@ def last_k_actions():
     return list(last_actions_deque) + [4] * (last_actions_deque.maxlen - len(last_actions_deque))  # padded with WAIT
 
 
+def last_action():
+    """
+    returns the last action as a one-hot
+    """
+    one_hot = [0] * 6
+    if len(last_actions_deque):
+        one_hot[last_actions_deque[-1]] = 1
+    return one_hot
+
+
 def is_stuck():
     """
     returns 1 when the agent is repeating actions such that it is stuck in one location,
@@ -449,6 +468,14 @@ def is_stuck():
         return 1
 
     return 0
+
+
+def is_at_crossing(ax, ay):
+    """
+    Idea: If bombs are not dropped at a crossing, two directions are blocked which lessens the impact.
+    This feature enables us to punish that.
+    """
+    return int((ax % 2 == 1) and (ay % 2 == 1))
 
 
 def crates_reachable(ax, ay, field):
@@ -573,7 +600,6 @@ def nearest_safe_tile(ax, ay, explosion_map, others, bombs, dist, grad, in_dange
 
 
 def disallowed_actions(game_state, explosion_map, others, bombs, dist, grad, nearest_safe):
-    # todo: make this more efficient, fix that in very rare cases all actions are disallowed
     """
     can be used as feature or to block those actions in the choose_action function
     that would lead to certain death
@@ -584,10 +610,7 @@ def disallowed_actions(game_state, explosion_map, others, bombs, dist, grad, nea
         not bomb_available)  # Cannot bomb if it has no bomb. I have never seen the agent try to do that though
 
     field = game_state['field']
-    bombs_list = game_state['bombs']
-    bombs = []
-    for bomb in bombs_list:
-        bombs.append(bomb[0])  # only the bomb coordinates
+
     directions = [(ax + 1, ay), (ax, ay + 1), (ax - 1, ay), (ax, ay - 1)]  # Right, Down, Left, Up
 
     if explosion_map[ax, ay] == 0:  # if not in explosion, do not walk into explosion (or wall)
@@ -606,12 +629,22 @@ def disallowed_actions(game_state, explosion_map, others, bombs, dist, grad, nea
 
     else:  # is in imminent explosion zone, bombs cannot be empty if this is the case
         disallowed[4] = 1  # do not wait
+        disallowed[5] = 1  # This does prevent getting stuck next to an enemy bomb, but I would prefer leaving this out later
         # get the bombs and only allow actions that move the agent away from them.
         disallowed[0:4] = [1] * 4
+
+        closest_bomb = None
+        min_distance = float('inf')
+
         for (bx, by) in bombs:
-            for i, (dx, dy) in enumerate(directions):
-                if abs(ax - bx) + abs(ay - by) < abs(dx - bx) + abs(dy - by) and field[dx, dy] == 0:
-                    disallowed[i] = 0  # allow if that direction brings more distance between the agent and the bomb
+            distance = abs(ax - bx) + abs(ay - by)  # Manhattan distance
+            if distance < min_distance:
+                min_distance = distance
+                closest_bomb = (bx, by)
+        (bx, by) = closest_bomb
+        for i, (dx, dy) in enumerate(directions):
+            if abs(ax - bx) + abs(ay - by) < abs(dx - bx) + abs(dy - by) and field[dx, dy] == 0:
+                disallowed[i] = 0  # allow if that direction brings more distance between the agent and the bomb
 
     # disallow bomb placement if it would lead to certain death
     if bomb_available:
@@ -630,10 +663,14 @@ def disallowed_actions(game_state, explosion_map, others, bombs, dist, grad, nea
 
         # calculate the future game state and check whether the agent could escape the bomb
         future_nearest_safe = nearest_safe_tile(ax, ay, future_explosion_map, others, bombs, dist, grad, True)
+
+        # distance map ignores enemies since they move, so we manually have to check whether an enemy agent blocks that direction
+        for i, d in enumerate(directions):
+            if d in others:
+                future_nearest_safe[i] = 15
+
         if all(x > 4 for x in future_nearest_safe):  # try with 3, perhaps that fixes it
             disallowed[5] = 1  # Disallow placing a bomb
-
-    # todo: disallow being stuck. take into account more complex stuck patterns such es left up down right left up...
 
     return disallowed
 
@@ -663,7 +700,106 @@ def enemies_distances_and_directions(dist, others, grad):
 
     return features
 
-# todo: - prevent agent getting stuck going back and forth
-#  - prevent agent from going into a dead end when an enemy can then place a bomb at the entrance or at least punish when that happens
-#  - the agent can still be killed by a rule_based agent. Why though? (unusual exposion configurations)
-#  - reward moving closer to enemies in the end (atm it flees)
+
+def dead_end_map(field):
+    """
+    Returns map of all dead ends (straight lines of length 2+ with one entrance, no L-shapes or similar.
+    The idea is to teach the agent to avoid these when enemies are nearby and to follow enemy agents inside
+    and then placing a bomb behind them when they make the mistake of entering one.
+    """
+    dead_end_map = np.zeros_like(field)
+    directions = [(1, 0), (0, 1), (-1, 0), (0, -1)]  # Right, Down, Left, Up
+
+    def is_dead_end(x, y):
+        """Check if a tile is part of a dead end and trace the full dead end path."""
+        dead_end_path = [(x, y)]  # Start from this tile
+        current_x, current_y = x, y
+        prev_x, prev_y = -1, -1
+
+        while True:
+            open_neighbors = []
+            for dx, dy in directions:
+                nx, ny = current_x + dx, current_y + dy
+                if field[nx, ny] == 0 and (nx, ny) != (prev_x, prev_y):  # Only count open tiles, avoid the previous one
+                    open_neighbors.append((nx, ny))
+
+            if len(open_neighbors) == 1:  # Dead-end continues if only one neighbor is open
+                prev_x, prev_y = current_x, current_y
+                current_x, current_y = open_neighbors[0]
+                dead_end_path.append((current_x, current_y))
+            else:
+                break  # If more than one neighbor is open, it's not part of a dead end
+
+        # A valid dead end must have length of at least 2 tiles
+        if len(dead_end_path) > 2:
+            for px, py in dead_end_path[:-1]:
+                dead_end_map[px, py] = 1
+
+    # Iterate over every cell in the field
+    for x in range(1, 16):
+        for y in range(1, 16):
+            if field[x, y] == 0:  # Free tile, check for dead end
+                open_neighbors = sum(1 for dx, dy in directions if field[x + dx, y + dy] == 0)
+                if open_neighbors == 1:  # Only one open neighbor indicates a potential dead end entrance
+                    is_dead_end(x, y)
+
+    return dead_end_map
+
+
+def direction_to_enemy_in_dead_end(dead_end_map, others, dist, grad):
+    """
+    If there is an enemy within 5 tiles entering a dead end,
+    return one-hot directions to the enemy.
+    Also return whether the agent is less than four steps away
+    from the end of the dead end, because if it drops a bomb then,
+    the enemy is dead for sure. This can then easily be rewarded,
+    enabling the agent to learn this behavior without the need for artificial constraints.
+    """
+    one_hot_direction = [0, 0, 0, 0]  # Placeholder for one-hot direction (Right, Down, Left, Up)
+    enemy_in_dead_end = False
+    can_trap_enemy = 0
+
+    for enemy_pos in others:
+        ex, ey = enemy_pos
+
+        # Check if the enemy is in a dead end
+        if dead_end_map[ex, ey] == 1:
+            # Check if the enemy is within 5 tiles
+            if dist[ex, ey] <= 5:  # only focus on nearby enemies, else the agent cannot reach the dead end in time
+                direction = direction_to_object((ex, ey), grad)
+
+                one_hot_direction = [
+                    int(direction == 1),  # Right
+                    int(direction == 2),  # Down
+                    int(direction == -1),  # Left
+                    int(direction == -2)  # Up
+                ]
+
+                # Enemy is in a dead end
+                enemy_in_dead_end = True
+
+                # Check if the agent is less than 4 steps away from the dead-end path to trap the enemy
+                if dist[ex, ey] <= 4:
+                    can_trap_enemy = 1
+
+                break  # Only focus on the first detected enemy in a dead end
+
+    one_hot_direction.append(int(enemy_in_dead_end))
+    one_hot_direction.append(can_trap_enemy)
+
+    return one_hot_direction
+
+
+def do_not_enter_dead_end():
+    """do not enter dead end if enemy nearby"""
+
+# todo:
+#  - solve oscillation problem!
+#  - reward attacking/moving closer to enemies later in the game (atm the agent flees instead)
+#  - sometimes runs into enemy explosions while fleeing from its own explosion - flaw in disallowed_actions
+#  - can get trapped between two bombs/surrounded by other agents - add function/features that prevents this
+#  - make disallowed_actions the "function of absolute immortality" - the agent should not be able to die at all
+#  - the agent does not seem motivated to move toward and blow up crates in the end
+#  - experiment: add many layers and see what happens
+#  - check whether all rewards always work as they are supposed to and do not somehow cause the agent to learn
+#    unwanted stuff such as the oscillation behavior
