@@ -10,7 +10,7 @@ from heapq import heapify, heappop, heappush
 
 
 class DeepQNetwork(nn.Module):
-    def __init__(self, lr, input_dims, l1_dims, l2_dims, l3_dims, l4_dims, dropout_rate=0.2):
+    def __init__(self, lr, input_dims, l1_dims, l2_dims, l3_dims, l4_dims, l5_dims, dropout_rate=0.2):
         super(DeepQNetwork, self).__init__()
         # torch.autograd.set_detect_anomaly(True)  # remove when it works
         self.input_dims = input_dims
@@ -18,6 +18,7 @@ class DeepQNetwork(nn.Module):
         self.l2_dims = l2_dims
         self.l3_dims = l3_dims
         self.l4_dims = l4_dims
+        self.l5_dims = l5_dims
 
         self.l1 = nn.Linear(self.input_dims, self.l1_dims)
         self.dropout1 = nn.Dropout(p=dropout_rate)
@@ -27,7 +28,9 @@ class DeepQNetwork(nn.Module):
         self.dropout3 = nn.Dropout(p=dropout_rate)
         self.l4 = nn.Linear(self.l3_dims, self.l4_dims)
         self.dropout4 = nn.Dropout(p=dropout_rate)
-        self.lo = nn.Linear(self.l4_dims, 6)  # There are always six possible actions
+        self.l5 = nn.Linear(self.l4_dims, self.l5_dims)
+        self.dropout5 = nn.Dropout(p=dropout_rate)
+        self.lo = nn.Linear(self.l5_dims, 6)  # There are always six possible actions
 
         # Optimizer (see https://pytorch.org/docs/stable/optim.html#algorithms)
         self.optimizer = optim.Adam(self.parameters(), lr=lr)
@@ -55,6 +58,9 @@ class DeepQNetwork(nn.Module):
         x = f.relu(self.l4(x))
         if train:
             x = self.dropout4(x)
+        x = f.relu(self.l5(x))
+        if train:
+            x = self.dropout5(x)
         actions = self.lo(x)
         # actions_prob = torch.sigmoid_(actions)
         # softmax/sigmoid causes really weird errors here
@@ -73,8 +79,8 @@ class Agent:
         self.mem_size = max_mem_size
         self.batch_size = batch_size
 
-        self.Q_eval = DeepQNetwork(self.lr, input_dims=input_dims, l1_dims=2 ** 8, l2_dims=2 ** 7,
-                                   l3_dims=2 ** 8, l4_dims=2 ** 7)  # experiment here
+        self.Q_eval = DeepQNetwork(self.lr, input_dims=input_dims, l1_dims=2 ** 7, l2_dims=2 ** 8,
+                                   l3_dims=2 ** 7, l4_dims=2 ** 8, l5_dims=2 ** 7)  # experiment here
 
         self.state_memory = np.zeros((self.mem_size, input_dims), dtype=np.float32)
         self.new_state_memory = np.zeros((self.mem_size, input_dims), dtype=np.float32)
@@ -87,7 +93,6 @@ class Agent:
         self.epoch = 0
 
     def store_transition(self, features, action, reward, state_, done):
-        # todo: data augmentation for faster training, if needed
         index = self.mem_cntr % self.mem_size
         self.state_memory[index] = features
         if state_ is not None:
@@ -252,9 +257,6 @@ def state_to_features(game_state: dict, logger) -> np.array:
     #  is
     # features.extend(last_k_actions())  # 50-53
     # add all further features with their sizes in one line like this for clarity
-
-    # todo:
-    # bomb positions
 
     return features
 
@@ -598,7 +600,6 @@ def nearest_safe_tile(ax, ay, explosion_map, others, bombs, dist, grad, in_dange
 
 
 def disallowed_actions(game_state, explosion_map, others, bombs, dist, grad, nearest_safe):
-    # todo: make this more efficient, fix that in very rare cases all actions are disallowed
     """
     can be used as feature or to block those actions in the choose_action function
     that would lead to certain death
@@ -631,10 +632,19 @@ def disallowed_actions(game_state, explosion_map, others, bombs, dist, grad, nea
         disallowed[5] = 1  # This does prevent getting stuck next to an enemy bomb, but I would prefer leaving this out later
         # get the bombs and only allow actions that move the agent away from them.
         disallowed[0:4] = [1] * 4
+
+        closest_bomb = None
+        min_distance = float('inf')
+
         for (bx, by) in bombs:
-            for i, (dx, dy) in enumerate(directions):
-                if abs(ax - bx) + abs(ay - by) < abs(dx - bx) + abs(dy - by) and field[dx, dy] == 0:
-                    disallowed[i] = 0  # allow if that direction brings more distance between the agent and the bomb
+            distance = abs(ax - bx) + abs(ay - by)  # Manhattan distance
+            if distance < min_distance:
+                min_distance = distance
+                closest_bomb = (bx, by)
+        (bx, by) = closest_bomb
+        for i, (dx, dy) in enumerate(directions):
+            if abs(ax - bx) + abs(ay - by) < abs(dx - bx) + abs(dy - by) and field[dx, dy] == 0:
+                disallowed[i] = 0  # allow if that direction brings more distance between the agent and the bomb
 
     # disallow bomb placement if it would lead to certain death
     if bomb_available:
@@ -661,8 +671,6 @@ def disallowed_actions(game_state, explosion_map, others, bombs, dist, grad, nea
 
         if all(x > 4 for x in future_nearest_safe):  # try with 3, perhaps that fixes it
             disallowed[5] = 1  # Disallow placing a bomb
-
-    # todo: disallow being stuck. take into account more complex stuck patterns such es left up down right left up...
 
     return disallowed
 
@@ -722,7 +730,7 @@ def dead_end_map(field):
             else:
                 break  # If more than one neighbor is open, it's not part of a dead end
 
-        # A valid dead end must have length of at least 2 tiles (including the start)
+        # A valid dead end must have length of at least 2 tiles
         if len(dead_end_path) > 2:
             for px, py in dead_end_path[:-1]:
                 dead_end_map[px, py] = 1
@@ -739,11 +747,13 @@ def dead_end_map(field):
 
 
 def direction_to_enemy_in_dead_end(dead_end_map, others, dist, grad):
-    """If there is an enemy within 5 tiles entering a dead end,
+    """
+    If there is an enemy within 5 tiles entering a dead end,
     return one-hot directions to the enemy.
-    Also return whether you are less than four steps away
-    from the end of the dead end, because if you drop a bomb then,
-    the enemy is dead for sure. This can then be easily rewarded.
+    Also return whether the agent is less than four steps away
+    from the end of the dead end, because if it drops a bomb then,
+    the enemy is dead for sure. This can then easily be rewarded,
+    enabling the agent to learn this behavior without the need for artificial constraints.
     """
     one_hot_direction = [0, 0, 0, 0]  # Placeholder for one-hot direction (Right, Down, Left, Up)
     enemy_in_dead_end = False
@@ -758,7 +768,6 @@ def direction_to_enemy_in_dead_end(dead_end_map, others, dist, grad):
             if dist[ex, ey] <= 5:  # only focus on nearby enemies, else the agent cannot reach the dead end in time
                 direction = direction_to_object((ex, ey), grad)
 
-                # Create a one-hot encoding for the direction
                 one_hot_direction = [
                     int(direction == 1),  # Right
                     int(direction == 2),  # Down
@@ -785,8 +794,12 @@ def do_not_enter_dead_end():
     """do not enter dead end if enemy nearby"""
 
 # todo:
-#  - reward attacking enemies later in the game
-#  - the agent can still be killed by a rule_based agent. Why though? (unusual explosion configurations, bombs placed at the same time)
-#  - in essence, make disallowed_actions the "function of absolute immortality"
-#  - reward moving closer to enemies in the end (atm it flees)
-#  - do not let the agent get surrounded by other agents
+#  - solve oscillation problem!
+#  - reward attacking/moving closer to enemies later in the game (atm the agent flees instead)
+#  - sometimes runs into enemy explosions while fleeing from its own explosion - flaw in disallowed_actions
+#  - can get trapped between two bombs/surrounded by other agents - add function/features that prevents this
+#  - make disallowed_actions the "function of absolute immortality" - the agent should not be able to die at all
+#  - the agent does not seem motivated to move toward and blow up crates in the end
+#  - experiment: add many layers and see what happens
+#  - check whether all rewards always work as they are supposed to and do not somehow cause the agent to learn
+#    unwanted stuff such as the oscillation behavior

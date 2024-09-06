@@ -121,9 +121,6 @@ def game_events_occurred(self, old_game_state: dict, self_action: str, new_game_
     if new_features[3] == 1:
         events.append(IS_STUCK)
 
-    if followed_direction(old_features[8:12], self_action):
-        events.append(MOVED_TOWARD_CRATE)
-
     if followed_direction(old_features[47:51], self_action):
         events.append(MOVED_TOWARD_ENEMY_IN_DEAD_END)
     self.logger.info("Dead end features: " + str(new_features[47:51]))
@@ -139,9 +136,7 @@ def game_events_occurred(self, old_game_state: dict, self_action: str, new_game_
 
     crates_left = old_features[26]
     if crates_left:
-        direction_to_crate = old_features[8:12]
-        # self.logger.info("Direction and distance to nearest crate: " + str(direction_to_crate))
-        if self_action == ACTIONS[next((i for i, x in enumerate(direction_to_crate) if x > 0), 5)]:
+        if followed_direction(old_features[8:12], self_action):
             events.append(MOVED_TOWARD_CRATE)
 
     self.logger.info("Disallowed actions: " + str(new_features[20:26]))
@@ -204,7 +199,7 @@ def reward_from_events(self, events: List[str]) -> int:
         DROPPED_BOMB_THAT_CAN_DESTROY_CRATE: 0.5,  # reward per crate that the bomb can reach
         DROPPED_BOMB_WHILE_ENEMY_NEAR: 2,
         IS_STUCK: -0.75,
-        MOVED_TOWARD_CRATE: 0.2,
+        MOVED_TOWARD_CRATE: 0.1,
         DROPPED_BOMB_NEXT_TO_CRATE: 1.5,
         DROPPED_BOMB_NOT_AT_CROSSING: -1,
         DID_OPPOSITE_OF_LAST_ACTION: -0.3,
