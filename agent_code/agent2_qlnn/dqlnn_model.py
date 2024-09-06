@@ -7,9 +7,7 @@ import torch.nn.functional as f
 from collections import deque
 import random
 from heapq import heapify, heappop, heappush
-
-from sympy.codegen.cnodes import sizeof
-
+from .utils import Direction, Distance
 
 class DeepQNetwork(nn.Module):
     def __init__(self, lr, dims, dropout_rate=0.3):
@@ -26,7 +24,7 @@ class DeepQNetwork(nn.Module):
         ])
 
         self.linear = nn.ModuleList([
-            nn.Linear(1157, 2048),
+            nn.Linear(1161, 2048),
             nn.Linear(2048, 1024),
             nn.Linear(1024, 512),
             nn.Linear(512, 256),
@@ -63,7 +61,7 @@ class DeepQNetwork(nn.Module):
 
 class Agent:
     def __init__(self, logger, gamma=0.9, lr=1e-4, epsilon=1.0, eps_end=0.1, eps_dec=1e-2,
-                 batch_size=64, symmetries=8, dims={'channels': 9,'height': 17, 'width': 17, 'linear': 1, 'out': 6}, max_mem_size=100000):
+                 batch_size=64, symmetries=4, dims={'channels': 5,'height': 17, 'width': 17, 'linear': 5, 'out': 6}, max_mem_size=100000):
         self.logger = logger
         self.gamma = gamma
         self.epsilon = epsilon
@@ -182,80 +180,66 @@ def state_symmetries(state):
     conv_features = []
     for feature in state['conv_features']:
         symmetries = [ # see https://www2.math.upenn.edu/~kazdan/202F13/notes/symmetries-square.pdf
-            feature,                            # I
-            np.rot90(feature, k=1),             # R
-            np.rot90(feature, k=2),             # R2
-            np.rot90(feature, k=-1),            # R3
-            np.fliplr(feature),                 # S
-            np.fliplr(np.rot90(feature, k=1)),  # SR
-            np.flipud(feature),                 # SR2
-            np.flipud(np.rot90(feature, k=1)),  # SR3
+            feature,                        # I
+            np.rot90(feature, k=1),         # R
+            np.rot90(feature, k=2),         # R2
+            np.rot90(feature, k=-1),        # R3
+            # np.fliplr(feature),             # S
+            # np.fliplr(np.rot90(feature)),   # SR
+            # np.flipud(feature),             # SR2
+            # np.flipud(np.rot90(feature)),   # SR3
         ]
         conv_features.append(symmetries)
 
-    lin_features = []
-    dir_mask = [False, True]
-    for idx, feature in enumerate(state['lin_features']):
-        if dir_mask[idx]:
-            symmetries = [
-                feature,                        # I
-                rot90(feature, k=1),            # R
-                rot90(feature, k=2),            # R2
-                rot90(feature, k=-1),           # R3
-                fliplr(feature),                # S
-                fliplr(rot90(feature, k=1)),    # SR
-                flipud(feature),                # SR2
-                flipud(rot90(feature, k=1)),    # SR3
-            ]
-        else:
-            symmetries = [feature] * 8
+    onehot_maps = [
+        {Direction.UP: 1, Direction.DOWN: 2, Direction.LEFT: 3, Direction.RIGHT: 4},
+    ]
+    for onehot_map in onehot_maps:
+        feature_buffer = {
+            Direction.UP: conv_features[onehot_map[Direction.UP]],
+            Direction.DOWN: conv_features[onehot_map[Direction.DOWN]],
+            Direction.LEFT: conv_features[onehot_map[Direction.LEFT]],
+            Direction.RIGHT: conv_features[onehot_map[Direction.RIGHT]],
+        }
 
+        for direction in (Direction.UP, Direction.DOWN, Direction.LEFT, Direction.RIGHT):
+            conv_features[onehot_map[direction]][1] = feature_buffer[ Direction.rot90(direction, k=1)               ][1]
+            conv_features[onehot_map[direction]][2] = feature_buffer[ Direction.rot90(direction, k=2)               ][2]
+            conv_features[onehot_map[direction]][3] = feature_buffer[ Direction.rot90(direction, k=-1)              ][3]
+            # conv_features[onehot_map[direction]][4] = feature_buffer[ Direction.fliplr(direction)                   ][4]
+            # conv_features[onehot_map[direction]][5] = feature_buffer[ Direction.fliplr(Direction.rot90(direction))  ][5]
+            # conv_features[onehot_map[direction]][6] = feature_buffer[ Direction.flipud(direction)                   ][6]
+            # conv_features[onehot_map[direction]][7] = feature_buffer[ Direction.flipud(Direction.rot90(direction))  ][7]
+
+    lin_features = []
+    for feature in state['lin_features']:
+        symmetries = [feature] * 4
         lin_features.append(symmetries)
+
+    onehot_maps = [
+        {Direction.UP: 1, Direction.DOWN: 2, Direction.LEFT: 3, Direction.RIGHT: 4},
+    ]
+    for onehot_map in onehot_maps:
+        feature_buffer = {
+            Direction.UP: lin_features[onehot_map[Direction.UP]],
+            Direction.DOWN: lin_features[onehot_map[Direction.DOWN]],
+            Direction.LEFT: lin_features[onehot_map[Direction.LEFT]],
+            Direction.RIGHT: lin_features[onehot_map[Direction.RIGHT]],
+        }
+
+        for direction in (Direction.UP, Direction.DOWN, Direction.LEFT, Direction.RIGHT):
+            lin_features[onehot_map[direction]][1]  = feature_buffer[ Direction.rot90(direction, k=1)               ][1]
+            lin_features[onehot_map[direction]][2]  = feature_buffer[ Direction.rot90(direction, k=2)               ][2]
+            lin_features[onehot_map[direction]][3]  = feature_buffer[ Direction.rot90(direction, k=-1)              ][3]
+            # lin_features[onehot_map[direction]][4]  = feature_buffer[ Direction.fliplr(direction)                   ][4]
+            # lin_features[onehot_map[direction]][5]  = feature_buffer[ Direction.fliplr(Direction.rot90(direction))  ][5]
+            # lin_features[onehot_map[direction]][6]  = feature_buffer[ Direction.flipud(direction)                   ][6]
+            # lin_features[onehot_map[direction]][7]  = feature_buffer[ Direction.flipud(Direction.rot90(direction))  ][7]
 
     conv_features = np.swapaxes(np.array(conv_features), 0, 1)
     lin_features = np.swapaxes(np.array(lin_features), 0, 1)
 
     return conv_features, lin_features
-
-# Direction Mapping: invert direction by multiplying with -1
-dUP = -2
-dLEFT = -1
-dNONE = 0
-dRIGHT = 1
-dDOWN = 2
-
-def rot90(direction, k=1):
-    for i in range(k % 4):
-        if direction == dUP:
-            direction = dRIGHT
-        elif direction == dRIGHT:
-            direction = dDOWN
-        elif direction == dDOWN:
-            direction = dLEFT
-        elif direction == dLEFT:
-            direction = dUP
-        else:
-            return dNONE
-
-    return direction
-
-def fliplr(direction):
-    if direction == dLEFT:
-        return dRIGHT
-    elif direction == dRIGHT:
-        return dLEFT
-    else:
-        return direction
-
-def flipud(direction):
-    if direction == dUP:
-        return dDOWN
-    elif direction == dDOWN:
-        return dUP
-    else:
-        return direction
-
-INF = 999 # 999 represents infinity
 
 def state_to_features(game_state: dict) -> np.array:
     """
@@ -283,39 +267,36 @@ def state_to_features(game_state: dict) -> np.array:
     arena = game_state['field']
 
     dist, grad, direction, crates = distance_map(ax, ay, arena)
-    up, down, left, right = onehot_encode_direction(direction)
     coins = coin_map(game_state['coins'], arena)
     players = player_map(ax, ay, others, arena)
     danger = danger_map(game_state['bombs'], game_state['explosion_map'], dist)
 
     conv_features.append(dist)
-    #conv_features.append(up)
-    #conv_features.append(down)
-    #conv_features.append(left)
-    #conv_features.append(right)
-    #conv_features.append(crates)
-    #conv_features.append(coins)
-    #conv_features.append(players)
-    #conv_features.append(danger)
+    conv_features.extend(onehot_encode_direction_map(direction))
+    # conv_features.append(crates)
+    # conv_features.append(coins)
+    # conv_features.append(players)
+    # conv_features.append(danger)
 
     lin_features.append(int(bomb_available))
+    lin_features.extend(onehot_encode_direction(Direction.UP))
     #lin_features.extend(last_k_actions())
 
     return {'conv_features': conv_features, 'lin_features': lin_features}
 
 # Use Dijkstra to calculate distance to every position and corresponding gradient
 def distance_map(ax, ay, arena):
-    dist = np.full_like(arena, INF)
-    grad = np.full_like(arena, dNONE)
+    dist = np.full_like(arena, Distance.INFINITE)
+    grad = np.full_like(arena, Direction.NONE)
     scanned = np.full_like(arena, False)
 
-    crates = np.full_like(arena, INF)
+    crates = np.full_like(arena, Distance.INFINITE)
 
-    direction = np.full_like(arena, dNONE)
-    direction[ax, ay + 1] = dDOWN
-    direction[ax, ay - 1] = dUP
-    direction[ax + 1, ay] = dLEFT
-    direction[ax - 1, ay] = dRIGHT
+    direction = np.full_like(arena, Direction.NONE)
+    direction[ax, ay + 1] = Direction.DOWN
+    direction[ax, ay - 1] = Direction.UP
+    direction[ax + 1, ay] = Direction.LEFT
+    direction[ax - 1, ay] = Direction.RIGHT
 
     dist[ax, ay] = 0
     crates[ax, ay] = 0
@@ -342,30 +323,38 @@ def distance_map(ax, ay, arena):
 
     return dist, grad, direction, crates
 
+def onehot_encode_direction_map(direction_map):
+    up      = [[int(direction == Direction.UP) for direction in line] for line in direction_map]
+    down    = [[int(direction == Direction.DOWN) for direction in line] for line in direction_map]
+    left    = [[int(direction == Direction.LEFT) for direction in line] for line in direction_map]
+    right   = [[int(direction == Direction.RIGHT) for direction in line] for line in direction_map]
+
+    return up, down, left, right
+
 def onehot_encode_direction(direction):
-    up = [[int(d == dUP) for d in line] for line in direction]
-    down = [[int(d == dDOWN) for d in line] for line in direction]
-    left = [[int(d == dLEFT) for d in line] for line in direction]
-    right = [[int(d == dRIGHT) for d in line] for line in direction]
+    up      = int(direction == Direction.UP)
+    down    = int(direction == Direction.DOWN)
+    left    = int(direction == Direction.LEFT)
+    right   = int(direction == Direction.RIGHT)
 
     return up, down, left, right
 
 # Follow gradient to agent, to determine path
 def direction_to_object(obj, grad):
     if obj == (-1, -1):
-        return dNONE
+        return Direction.NONE
     x, y = obj
 
-    direction = dNONE
-    while grad[x, y] != dNONE:
+    direction = Direction.NONE
+    while grad[x, y] != Direction.NONE:
         direction = -grad[x, y]
-        if grad[x, y] == dUP:
+        if grad[x, y] == Direction.UP:
             y -= 1
-        elif grad[x, y] == dDOWN:
+        elif grad[x, y] == Direction.DOWN:
             y += 1
-        elif grad[x, y] == dLEFT:
+        elif grad[x, y] == Direction.LEFT:
             x -= 1
-        elif grad[x, y] == dRIGHT:
+        elif grad[x, y] == Direction.RIGHT:
             x += 1
 
     return direction
@@ -386,7 +375,7 @@ def danger_map(bombs, explosion_map, dist):
     for (bx, by), t in bombs: # for every bomb
         for dx, dy in [(-1, 0), (1, 0), (0, -1), (0, 1)]: # in every direction
             for r in range(explosion_radius + 1): # from 0 to 3
-                if dist[bx + r*dx, by + r*dy] == INF: # explosion blocked by wall
+                if dist[bx + r*dx, by + r*dy] == Distance.INFINITE: # explosion blocked by wall
                     break
                 explosion_map[bx + r*dx, by + r*dy] = max(t + 3, explosion_map[bx + r*dx, by + r*dy])
 
