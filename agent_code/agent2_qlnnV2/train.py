@@ -14,8 +14,10 @@ MOVED_TOWARD_CRATE = 'MOVED_TOWARD_CRATE'
 IS_STUCK = "IS_STUCK"
 DROPPED_BOMB_THAT_CAN_DESTROY_CRATE = 'DROPPED_BOMB_THAT_CAN_DESTROY_CRATE'  # reward for each crate
 DROPPED_BOMB_NEXT_TO_CRATE = "DROPPED_BOMB_NEXT_TO_CRATE"
-DROPPED_BOMB_WHILE_ENEMY_NEAR = 'DROPPED_BOMB_WHILE_ENEMY_NEAR'  # todo, reward per enemy
+DROPPED_BOMB_WHILE_ENEMY_NEAR = 'DROPPED_BOMB_WHILE_ENEMY_NEAR'
 IS_IN_BOMB_EXPLOSION_RADIUS = 'IS_IN_BOMB_EXPLOSION_RADIUS'
+DROPPED_BOMB_NOT_AT_CROSSING = 'DROPPED_BOMB_NOT_AT_CROSSING'  # see is_at_crossing function for the idea behind this
+DID_OPPOSITE_OF_LAST_ACTION = 'DID_OPPOSITE_OF_LAST_ACTION'  # idea: prevent oscillating back and forth
 
 
 def setup_training(self):
@@ -27,6 +29,9 @@ def setup_training(self):
     :param self: This object is passed to all callbacks and you can set arbitrary values.
     """
     self.save_frequency = 500  # store a snapshot every n rounds
+
+
+previous_action = 'WAIT'
 
 
 def game_events_occurred(self, old_game_state: dict, self_action: str, new_game_state: dict, events: List[str]):
@@ -54,7 +59,7 @@ def game_events_occurred(self, old_game_state: dict, self_action: str, new_game_
     new_features = state_to_features(new_game_state, self.logger)
 
     crate_count = old_features[1]
-    self.logger.info("Crates reachable: " + str(crate_count))
+    # self.logger.info("Crates reachable: " + str(crate_count))
     if self_action == 'BOMB':
         bomb_position = old_game_state['self'][3]
 
@@ -87,16 +92,28 @@ def game_events_occurred(self, old_game_state: dict, self_action: str, new_game_
                             events.append(
                                 DROPPED_BOMB_WHILE_ENEMY_NEAR)  # higher reward for dropping bombs closer to enemies.
 
+        if old_features[40] == 0:
+            events.append(DROPPED_BOMB_NOT_AT_CROSSING)
+
     if new_features[2] == 1:
         events.append(IS_IN_BOMB_EXPLOSION_RADIUS)
 
     if new_features[3] == 1:
         events.append(IS_STUCK)
 
+    global previous_action
+    if (self_action == 'UP' and previous_action == 'DOWN') or (self_action == 'DOWN' and previous_action == 'UP') or \
+            (self_action == 'LEFT' and previous_action == 'RIGHT') or (self_action == 'RIGHT' and previous_action == 'LEFT'):
+        events.append(DID_OPPOSITE_OF_LAST_ACTION)
+    self.logger.info("Previous action: " + previous_action)
+    self.logger.info("Current action: " + self_action)
+    previous_action = self_action
+
+
     crates_left = old_features[26]
     if crates_left:
         direction_to_crate = old_features[8:12]
-        self.logger.info("Direction and distance to nearest crate: " + str(direction_to_crate))
+        # self.logger.info("Direction and distance to nearest crate: " + str(direction_to_crate))
         if self_action == ACTIONS[next((i for i, x in enumerate(direction_to_crate) if x > 0), 5)]:
             events.append(MOVED_TOWARD_CRATE)
 
@@ -148,19 +165,22 @@ def reward_from_events(self, events: List[str]) -> int:
         e.MOVED_DOWN: -0.1,
         e.MOVED_LEFT: -0.1,
         e.MOVED_RIGHT: -0.1,
-        e.WAITED: -0.2,
+        e.WAITED: -0.3,
         e.COIN_COLLECTED: 5,
         e.KILLED_OPPONENT: 10,
-        e.KILLED_SELF: -15,
+        e.KILLED_SELF: -5,
         e.GOT_KILLED: -5,
         e.INVALID_ACTION: -1,
         e.OPPONENT_ELIMINATED: 5,
-        e.BOMB_DROPPED: -1.5,
+        e.BOMB_DROPPED: -0.5,
+        e.SURVIVED_ROUND: 5,
         DROPPED_BOMB_THAT_CAN_DESTROY_CRATE: 0.5,  # reward per crate that the bomb can reach
         DROPPED_BOMB_WHILE_ENEMY_NEAR: 2,
         IS_STUCK: -0.75,
         MOVED_TOWARD_CRATE: 0.2,
-        DROPPED_BOMB_NEXT_TO_CRATE: 1.5
+        DROPPED_BOMB_NEXT_TO_CRATE: 1.5,
+        DROPPED_BOMB_NOT_AT_CROSSING: -1,
+        DID_OPPOSITE_OF_LAST_ACTION: -0.3
     }
     reward_sum = sum(game_rewards[event] for event in events if event in game_rewards)
     self.logger.info(f"Awarded {reward_sum} for events {', '.join(events)}")
