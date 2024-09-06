@@ -18,6 +18,8 @@ DROPPED_BOMB_WHILE_ENEMY_NEAR = 'DROPPED_BOMB_WHILE_ENEMY_NEAR'
 IS_IN_BOMB_EXPLOSION_RADIUS = 'IS_IN_BOMB_EXPLOSION_RADIUS'
 DROPPED_BOMB_NOT_AT_CROSSING = 'DROPPED_BOMB_NOT_AT_CROSSING'  # see is_at_crossing function for the idea behind this
 DID_OPPOSITE_OF_LAST_ACTION = 'DID_OPPOSITE_OF_LAST_ACTION'  # idea: prevent oscillating back and forth
+MOVED_TOWARD_ENEMY_IN_DEAD_END = 'MOVED_TOWARD_ENEMY_IN_DEAD_END'  # see direction_to_enemy_in_dead_end
+DROPPED_BOMB_ON_TRAPPED_ENEMY = 'DROPPED_BOMB_ON_TRAPPED_ENEMY'  # enemy dies for sure, so high reward
 
 
 def setup_training(self):
@@ -32,6 +34,21 @@ def setup_training(self):
 
 
 previous_action = 'WAIT'
+
+
+def followed_direction(one_hot_direction, action):
+    action_to_index = {
+        'RIGHT': 0,
+        'DOWN': 1,
+        'LEFT': 2,
+        'UP': 3
+    }
+    # Check if self_action exists in the mapping and corresponds to the one-hot array
+    if action in action_to_index:
+        action_index = action_to_index[action]
+        return one_hot_direction[action_index] == 1
+    else:
+        return False
 
 
 def game_events_occurred(self, old_game_state: dict, self_action: str, new_game_state: dict, events: List[str]):
@@ -95,20 +112,30 @@ def game_events_occurred(self, old_game_state: dict, self_action: str, new_game_
         if old_features[40] == 0:
             events.append(DROPPED_BOMB_NOT_AT_CROSSING)
 
+        if old_features[52] == 1:
+            events.append(DROPPED_BOMB_ON_TRAPPED_ENEMY)
+
     if new_features[2] == 1:
         events.append(IS_IN_BOMB_EXPLOSION_RADIUS)
 
     if new_features[3] == 1:
         events.append(IS_STUCK)
 
+    if followed_direction(old_features[8:12], self_action):
+        events.append(MOVED_TOWARD_CRATE)
+
+    if followed_direction(old_features[47:51], self_action):
+        events.append(MOVED_TOWARD_ENEMY_IN_DEAD_END)
+    self.logger.info("Dead end features: " + str(new_features[47:51]))
+
     global previous_action
     if (self_action == 'UP' and previous_action == 'DOWN') or (self_action == 'DOWN' and previous_action == 'UP') or \
-            (self_action == 'LEFT' and previous_action == 'RIGHT') or (self_action == 'RIGHT' and previous_action == 'LEFT'):
+            (self_action == 'LEFT' and previous_action == 'RIGHT') or (
+            self_action == 'RIGHT' and previous_action == 'LEFT'):
         events.append(DID_OPPOSITE_OF_LAST_ACTION)
     self.logger.info("Previous action: " + previous_action)
     self.logger.info("Current action: " + self_action)
     previous_action = self_action
-
 
     crates_left = old_features[26]
     if crates_left:
@@ -180,7 +207,9 @@ def reward_from_events(self, events: List[str]) -> int:
         MOVED_TOWARD_CRATE: 0.2,
         DROPPED_BOMB_NEXT_TO_CRATE: 1.5,
         DROPPED_BOMB_NOT_AT_CROSSING: -1,
-        DID_OPPOSITE_OF_LAST_ACTION: -0.3
+        DID_OPPOSITE_OF_LAST_ACTION: -0.3,
+        MOVED_TOWARD_ENEMY_IN_DEAD_END: 1,
+        DROPPED_BOMB_ON_TRAPPED_ENEMY: 10  # enemy dies for sure
     }
     reward_sum = sum(game_rewards[event] for event in events if event in game_rewards)
     self.logger.info(f"Awarded {reward_sum} for events {', '.join(events)}")

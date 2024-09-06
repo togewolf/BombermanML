@@ -73,8 +73,8 @@ class Agent:
         self.mem_size = max_mem_size
         self.batch_size = batch_size
 
-        self.Q_eval = DeepQNetwork(self.lr, input_dims=input_dims, l1_dims=2 ** 7, l2_dims=2 ** 6,
-                                   l3_dims=2 ** 7, l4_dims=2 ** 6)  # experiment here
+        self.Q_eval = DeepQNetwork(self.lr, input_dims=input_dims, l1_dims=2 ** 8, l2_dims=2 ** 7,
+                                   l3_dims=2 ** 8, l4_dims=2 ** 7)  # experiment here
 
         self.state_memory = np.zeros((self.mem_size, input_dims), dtype=np.float32)
         self.new_state_memory = np.zeros((self.mem_size, input_dims), dtype=np.float32)
@@ -220,6 +220,7 @@ def state_to_features(game_state: dict, logger) -> np.array:
     if danger_zone[ax, ay] == 1:
         in_danger = True
     nearest_safe = nearest_safe_tile(ax, ay, danger_zone, others, bombs, dist, grad, in_danger)
+    dead_ends = dead_end_map(field)
     # logger.info("In danger: " + str(in_danger))
     # logger.info(danger_zone)
     # logger.info("Distances to nearest safe tiles: " + str(nearest_safe))
@@ -227,8 +228,8 @@ def state_to_features(game_state: dict, logger) -> np.array:
     # logger.info(dist)
     # logger.info("Enemies distances: " +str(enemies_distances_and_directions(dist, others, grad)))
     # logger.info("is at crossing: " + str(is_at_crossing(ax, ay)))
-    logger.info(field)
-    logger.info(dead_end_map(field))
+    # logger.info(field)
+    # logger.info(dead_ends)
 
     # features
     features.append(int(bomb_available))  # feat 0
@@ -246,6 +247,7 @@ def state_to_features(game_state: dict, logger) -> np.array:
     features.extend(enemies_distances_and_directions(dist, others, grad))  # 28-39
     features.append(is_at_crossing(ax, ay))  # 40
     features.extend(last_action())  # 41-46
+    features.extend(direction_to_enemy_in_dead_end(dead_ends, others, dist, grad))  # 47-52
     # features.extend(neighboring(ax, ay, game_state))  # 26-51  # todo perhaps a separate convolutional subnetwork for th
     #  is
     # features.extend(last_k_actions())  # 50-53
@@ -736,22 +738,55 @@ def dead_end_map(field):
     return dead_end_map
 
 
-def direction_to_enemy_in_dead_end(dead_end_map, others, dist,):
+def direction_to_enemy_in_dead_end(dead_end_map, others, dist, grad):
     """If there is an enemy within 5 tiles entering a dead end,
     return one-hot directions to the enemy.
     Also return whether you are less than four steps away
     from the end of the dead end, because if you drop a bomb then,
     the enemy is dead for sure. This can then be easily rewarded.
     """
+    one_hot_direction = [0, 0, 0, 0]  # Placeholder for one-hot direction (Right, Down, Left, Up)
+    enemy_in_dead_end = False
+    can_trap_enemy = 0
+
+    for enemy_pos in others:
+        ex, ey = enemy_pos
+
+        # Check if the enemy is in a dead end
+        if dead_end_map[ex, ey] == 1:
+            # Check if the enemy is within 5 tiles
+            if dist[ex, ey] <= 5:  # only focus on nearby enemies, else the agent cannot reach the dead end in time
+                direction = direction_to_object((ex, ey), grad)
+
+                # Create a one-hot encoding for the direction
+                one_hot_direction = [
+                    int(direction == 1),  # Right
+                    int(direction == 2),  # Down
+                    int(direction == -1),  # Left
+                    int(direction == -2)  # Up
+                ]
+
+                # Enemy is in a dead end
+                enemy_in_dead_end = True
+
+                # Check if the agent is less than 4 steps away from the dead-end path to trap the enemy
+                if dist[ex, ey] <= 4:
+                    can_trap_enemy = 1
+
+                break  # Only focus on the first detected enemy in a dead end
+
+    one_hot_direction.append(int(enemy_in_dead_end))
+    one_hot_direction.append(can_trap_enemy)
+
+    return one_hot_direction
 
 
 def do_not_enter_dead_end():
     """do not enter dead end if enemy nearby"""
 
 # todo:
-#  - prevent agent from killing itself completely
-#  - feature enemy neighboring, enemy close
+#  - reward attacking enemies later in the game
 #  - the agent can still be killed by a rule_based agent. Why though? (unusual explosion configurations, bombs placed at the same time)
-#  - in essence, make disallowed_actions the "function of immortality"
+#  - in essence, make disallowed_actions the "function of absolute immortality"
 #  - reward moving closer to enemies in the end (atm it flees)
 #  - do not let the agent get surrounded by other agents
