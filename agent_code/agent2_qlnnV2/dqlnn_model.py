@@ -68,8 +68,8 @@ class DeepQNetwork(nn.Module):
 
 
 class Agent:
-    def __init__(self, logger, gamma, epsilon, lr, input_dims, batch_size, max_mem_size=100000, eps_end=0.10,
-                 eps_dec=9e-3):
+    def __init__(self, logger, gamma, epsilon, lr, input_dims, batch_size, max_mem_size=100000, eps_end=0.01,
+                 eps_dec=1e-2):
         self.logger = logger
         self.gamma = gamma
         self.epsilon = epsilon

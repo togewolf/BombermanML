@@ -1,4 +1,6 @@
 
+ACTIONS = ['RIGHT', 'DOWN', 'LEFT', 'UP', 'WAIT', 'BOMB']
+
 class Direction:
     UP = -2
     LEFT = -1

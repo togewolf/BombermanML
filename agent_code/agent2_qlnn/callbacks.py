@@ -2,8 +2,7 @@ import os
 import pickle
 from collections import deque
 from .dqlnn_model import Agent, state_to_features
-
-ACTIONS = ['RIGHT', 'DOWN', 'LEFT', 'UP', 'WAIT', 'BOMB']
+from .utils import ACTIONS
 
 
 def setup(self):

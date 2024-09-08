@@ -84,8 +84,8 @@ def game_events_occurred(self, old_game_state: dict, self_action: str, new_game_
             events.append(MOVED_BACK_AND_FORTH)
 
 
-    self.model.store_transition(old_features, ACTION_MAP[self_action],
-                                reward_from_events(self, events), new_features, done=False)
+    self.model.store_transition(old_features, new_features, ACTION_MAP[self_action],
+                                reward_from_events(self, events), done=False)
     self.model.learn()
 
 
@@ -104,8 +104,8 @@ def end_of_round(self, last_game_state: dict, last_action: str, events: List[str
     """
     self.logger.debug(f'Encountered event(s) {", ".join(map(repr, events))} in final step')
 
-    self.model.store_transition(state_to_features(last_game_state), ACTION_MAP[last_action],
-                                reward_from_events(self, events), None, done=True)
+    self.model.store_transition(state_to_features(last_game_state), None, ACTION_MAP[last_action],
+                                reward_from_events(self, events), done=True)
     self.model.learn(end_epoch=True)
 
     # save snapshot of the model
