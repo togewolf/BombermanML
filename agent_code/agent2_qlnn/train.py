@@ -1,14 +1,11 @@
 import pickle
 from typing import List
+import os
+import csv
 
 import events as e
 from .dqlnn_model import state_to_features, nearest_objects
-
-import os
-import csv  # to store scores
-
-ACTIONS = ['RIGHT', 'DOWN', 'LEFT', 'UP', 'WAIT', 'BOMB']
-ACTION_MAP = {action: idx for idx, action in enumerate(ACTIONS)}
+from .utils import Action
 
 # Events
 MOVED_TOWARD_COIN = 'MOVED_TOWARD_COIN'  # toward the closest coin
@@ -84,7 +81,7 @@ def game_events_occurred(self, old_game_state: dict, self_action: str, new_game_
             events.append(MOVED_BACK_AND_FORTH)
 
 
-    self.model.store_transition(old_features, new_features, ACTION_MAP[self_action],
+    self.model.store_transition(old_features, new_features, Action.from_str(self_action),
                                 reward_from_events(self, events), done=False)
     self.model.learn()
 
@@ -104,7 +101,7 @@ def end_of_round(self, last_game_state: dict, last_action: str, events: List[str
     """
     self.logger.debug(f'Encountered event(s) {", ".join(map(repr, events))} in final step')
 
-    self.model.store_transition(state_to_features(last_game_state), None, ACTION_MAP[last_action],
+    self.model.store_transition(state_to_features(last_game_state), None, Action.from_str(last_action),
                                 reward_from_events(self, events), done=True)
     self.model.learn(end_epoch=True)
 

@@ -2,7 +2,7 @@ import os
 import pickle
 from collections import deque
 from .dqlnn_model import Agent, state_to_features
-from .utils import ACTIONS
+from .utils import Action
 
 
 def setup(self):
@@ -47,5 +47,5 @@ def act(self, game_state: dict) -> str:
     :return: The action to take as a string.
     """
     action = self.model.choose_action(state_to_features(game_state), self.train)
-    self.logger.info("Action: " + ACTIONS[action])
-    return ACTIONS[action]
+    self.logger.info("Action: " + Action.to_str(action))
+    return Action.to_str(action)

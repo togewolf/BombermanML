@@ -1,5 +1,36 @@
 
-ACTIONS = ['RIGHT', 'DOWN', 'LEFT', 'UP', 'WAIT', 'BOMB']
+class Action:
+    RIGHT = 0
+    DOWN = 1
+    LEFT = 2
+    UP = 3
+    WAIT = 4
+    BOMB = 5
+
+    @classmethod
+    def from_str(a, str):
+        action_map = {
+            'RIGHT':    a.RIGHT,
+            'DOWN':     a.DOWN,
+            'LEFT':     a.LEFT,
+            'UP':       a.UP,
+            'WAIT':     a.WAIT,
+            'BOMB':     a.BOMB
+        }
+        return action_map[str]
+
+    @classmethod
+    def to_str(a, action):
+        action_map = {
+            a.RIGHT:    'RIGHT',
+            a.DOWN:     'DOWN',
+            a.LEFT:     'LEFT',
+            a.UP:       'UP',
+            a.WAIT:     'WAIT',
+            a.BOMB:     'BOMB'
+        }
+        return action_map[action]
+
 
 class Direction:
     UP = -2
@@ -7,6 +38,29 @@ class Direction:
     NONE = 0
     RIGHT = 1
     DOWN = 2
+
+    @classmethod
+    def from_action(d, action):
+        direction_map = {
+            Action.RIGHT:   d.RIGHT,
+            Action.DOWN:    d.DOWN,
+            Action.LEFT:    d.LEFT,
+            Action.UP:      d.UP,
+            Action.WAIT:    d.NONE,
+            Action.BOMB:    d.NONE
+        }
+        return direction_map[action]
+
+    @classmethod
+    def to_action(d, direction):
+        direction_map = {
+            d.RIGHT: Action.RIGHT,
+            d.DOWN: Action.DOWN,
+            d.LEFT: Action.LEFT,
+            d.UP: Action.UP,
+        }
+        return direction_map[direction]
+
 
     @classmethod
     def rot90(d, direction, k=1):
