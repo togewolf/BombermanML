@@ -506,8 +506,8 @@ def danger_map(distance, bombs, explosion_map):
     Map of potentially dangerous positions
 
     value of 0:     Safe position
-    value of 1-3:   Bomb is in exploded state
-    value of 3-5:   Bomb is about to explode
+    value of 1-2:   Active explosion
+    value of 3-6:   Bomb is about to explode
 
     :param distance:        Distance map from distance_map() function
     :param bombs:           List of bombs with their metadata
@@ -529,9 +529,9 @@ def player_map(ax, ay, others, arena):
     """
     Map of players
 
-    value of 0:     No player here
-    value of 1:     Our player
-    value of -1:    Other players
+    value  0:       No player
+    value  1:       Our agent
+    value -1:       Enemy player
 
     :param ax:      Players x coordinate
     :param ay:      Players y coordinate
@@ -549,6 +549,9 @@ def player_map(ax, ay, others, arena):
 def coin_map(coin_positions, arena):
     """
     Map of coins
+
+    value 0:                No coin
+    value 1:                Coin
 
     :param coin_positions:  List of coin positions
     :param arena:           Full arena data
