@@ -20,6 +20,8 @@ DROPPED_BOMB_NOT_AT_CROSSING = 'DROPPED_BOMB_NOT_AT_CROSSING'  # see is_at_cross
 DID_OPPOSITE_OF_LAST_ACTION = 'DID_OPPOSITE_OF_LAST_ACTION'  # idea: prevent oscillating back and forth
 MOVED_TOWARD_ENEMY_IN_DEAD_END = 'MOVED_TOWARD_ENEMY_IN_DEAD_END'  # see direction_to_enemy_in_dead_end
 DROPPED_BOMB_ON_TRAPPED_ENEMY = 'DROPPED_BOMB_ON_TRAPPED_ENEMY'  # enemy dies for sure, so high reward
+DROPPED_BOMB_NEXT_TO_ENEMY = 'DROPPED_BOMB_NEXT_TO_ENEMY'
+ENTERED_DEAD_END_WHILE_ENEMY_NEARBY = 'ENTERED_DEAD_END_WHILE_ENEMY_NEARBY'
 
 
 def setup_training(self):
@@ -115,6 +117,9 @@ def game_events_occurred(self, old_game_state: dict, self_action: str, new_game_
         if old_features[52] == 1:
             events.append(DROPPED_BOMB_ON_TRAPPED_ENEMY)
 
+        if old_features[53] == 1:
+            events.append(DROPPED_BOMB_NEXT_TO_ENEMY)
+
     if new_features[2] == 1:
         events.append(IS_IN_BOMB_EXPLOSION_RADIUS)
 
@@ -123,7 +128,7 @@ def game_events_occurred(self, old_game_state: dict, self_action: str, new_game_
 
     if followed_direction(old_features[47:51], self_action):
         events.append(MOVED_TOWARD_ENEMY_IN_DEAD_END)
-    self.logger.info("Dead end features: " + str(new_features[47:51]))
+    self.logger.info("Dead end features: " + str(new_features[47:53]))
 
     global previous_action
     if (self_action == 'UP' and previous_action == 'DOWN') or (self_action == 'DOWN' and previous_action == 'UP') or \
@@ -138,6 +143,10 @@ def game_events_occurred(self, old_game_state: dict, self_action: str, new_game_
     if crates_left:
         if followed_direction(old_features[8:12], self_action):
             events.append(MOVED_TOWARD_CRATE)
+
+        # there can only be dead ends if there are crates left:
+        if followed_direction(old_features[54:58], self_action):
+            events.append(ENTERED_DEAD_END_WHILE_ENEMY_NEARBY)
 
     self.logger.info("Disallowed actions: " + str(new_features[20:26]))
 
@@ -189,22 +198,24 @@ def reward_from_events(self, events: List[str]) -> int:
         e.MOVED_RIGHT: -0.1,
         e.WAITED: -0.3,
         e.COIN_COLLECTED: 5,
-        e.KILLED_OPPONENT: 10,
+        e.KILLED_OPPONENT: 7,
         e.KILLED_SELF: -5,
         e.GOT_KILLED: -5,
         e.INVALID_ACTION: -1,
-        e.OPPONENT_ELIMINATED: 5,
+        e.OPPONENT_ELIMINATED: 2.5,
         e.BOMB_DROPPED: -0.5,
         e.SURVIVED_ROUND: 5,
         DROPPED_BOMB_THAT_CAN_DESTROY_CRATE: 0.5,  # reward per crate that the bomb can reach
         DROPPED_BOMB_WHILE_ENEMY_NEAR: 2,
-        IS_STUCK: -0.75,
+        IS_STUCK: -0.5,
         MOVED_TOWARD_CRATE: 0.1,
         DROPPED_BOMB_NEXT_TO_CRATE: 1.5,
         DROPPED_BOMB_NOT_AT_CROSSING: -1,
         DID_OPPOSITE_OF_LAST_ACTION: -0.3,
         MOVED_TOWARD_ENEMY_IN_DEAD_END: 1,
-        DROPPED_BOMB_ON_TRAPPED_ENEMY: 10  # enemy dies for sure
+        DROPPED_BOMB_ON_TRAPPED_ENEMY: 9,  # enemy dies (almost) for sure
+        DROPPED_BOMB_NEXT_TO_ENEMY: 4,
+        ENTERED_DEAD_END_WHILE_ENEMY_NEARBY: -1.5
     }
     reward_sum = sum(game_rewards[event] for event in events if event in game_rewards)
     self.logger.info(f"Awarded {reward_sum} for events {', '.join(events)}")
