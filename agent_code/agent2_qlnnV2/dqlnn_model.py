@@ -79,8 +79,8 @@ class Agent:
         self.mem_size = max_mem_size
         self.batch_size = batch_size
 
-        self.Q_eval = DeepQNetwork(self.lr, input_dims=input_dims, l1_dims=2 ** 9, l2_dims=2 ** 8,
-                                   l3_dims=2 ** 9, l4_dims=2 ** 8, l5_dims=2 ** 9)  # experiment here
+        self.Q_eval = DeepQNetwork(self.lr, input_dims=input_dims, l1_dims=2 ** 9, l2_dims=2 ** 9,
+                                   l3_dims=2 ** 9, l4_dims=2 ** 9, l5_dims=2 ** 9)  # experiment here
 
         self.state_memory = np.zeros((self.mem_size, input_dims), dtype=np.float32)
         self.new_state_memory = np.zeros((self.mem_size, input_dims), dtype=np.float32)
@@ -254,7 +254,7 @@ def state_to_features(game_state: dict, logger) -> np.array:
     features.extend(enemies_distances_and_directions(dist, others, grad))  # 28-39
     features.append(is_at_crossing(ax, ay))  # 40
     features.extend(last_action())  # 41-46
-    features.extend(direction_to_enemy_in_dead_end(dend_list, dist, grad))  # 47-52
+    features.extend(direction_to_enemy_in_dead_end(ax, ay, dend_list, dist, grad))  # 47-52
     features.append(int(is_next_to_enemy(ax, ay, others)))  # 53
     features.extend(do_not_enter_dead_end(ax, ay, dend_map, dend_list, others, dist))  # 54 - 57
     # features.extend(neighboring(ax, ay, game_state))  # 26-51  # todo perhaps a separate convolutional subnetwork for th
@@ -556,7 +556,7 @@ def neighboring(ax, ay, game_state, k=2):
 
 def free_distance(ax, ay, field):
     """
-    :return: in all four directions the sqrt of the distance the agent can "see", eg. if there is a wall next to the agent
+    :return: in all four directions the sqrt of the distance the agent can "see", e.g. if there is a wall next to the agent
     zero in that direction. The distance can be at most 14 when the agent is at the edge of the field and a whole
     row is free
     """
@@ -731,6 +731,7 @@ def enemies_distances_and_directions(dist, others, grad):
 
 def dead_end_map(field, others):
     """
+    todo: fix
     Returns map of all dead ends.
     The idea is to teach the agent to avoid these when enemies are nearby and to follow enemy agents inside
     and then placing a bomb behind them when they make the mistake of entering one.
@@ -788,8 +789,9 @@ def dead_end_map(field, others):
     return dead_end_map, dead_end_list
 
 
-def direction_to_enemy_in_dead_end(dead_end_list, dist, grad):
+def direction_to_enemy_in_dead_end(ax, ay, dead_end_list, dist, grad):
     """
+    todo: something isn't right here
     If there is the open end of a dead end containing an enemy closer to our agent than the manhattan distance of the
     enemy to the open end, return one-hot directions to the enemy.
     Also return whether the agent is less than four steps away
@@ -827,9 +829,10 @@ def direction_to_enemy_in_dead_end(dead_end_list, dist, grad):
             elif direction == dUP:
                 one_hot_direction = [0, 0, 0, 1]
 
-            # Check if the agent can trap the enemy (agent is near the closed end)
+            # Check if the agent can trap the enemy with a bomb (agent is near the closed end)
             agent_to_closed_end_dist = dist[closed_end[0], closed_end[1]]
-            if agent_to_closed_end_dist <= 3:  # Less than 4 steps to the closed end
+            if agent_to_closed_end_dist <= 3 and \
+                    (closed_end[0] == ex == ax or closed_end[1] == ey == ay):  # it has to be a straight dead end
                 can_trap_enemy = 1
 
             break  # Stop after finding the first valid enemy in a dead end
@@ -877,8 +880,6 @@ def is_next_to_enemy(ax, ay, others, d=1):
     return False
 
 # todo today: achieve immortality
-#  - solve oscillation problem! Idea: record the last positions in a queue and drop a bomb if the positions change too little
-#  - reward attacking/moving closer to enemies later in the game (atm the agent flees instead)
 #  - sometimes runs into enemy explosions while fleeing from its own explosion - flaw in disallowed_actions
 #  - can get trapped between two bombs/surrounded by other agents - add function/features that prevents this
 #  - make disallowed_actions the "function of absolute immortality" - the agent should not be able to die at all
@@ -886,3 +887,4 @@ def is_next_to_enemy(ax, ay, others, d=1):
 #  - experiment: add many layers and see what happens
 #  - check whether all rewards always work as they are supposed to and do not somehow cause the agent to learn
 #    unwanted stuff such as the oscillation behavior
+#  - Why exactly does performance decrease after some amount of training steps? Why the periodic ups and downs?
