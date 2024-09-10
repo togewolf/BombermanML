@@ -8,16 +8,20 @@ from .dqlnn_model import state_to_features, get_nearest_objects
 from .utils import Action
 
 # Events
-MOVED_TOWARD_COIN = 'MOVED_TOWARD_COIN'  # toward the closest coin
-MOVED_AWAY_FROM_COIN = 'MOVED_AWAY_FROM_COIN'
 MOVED_TOWARD_CRATE = 'MOVED_TOWARD_CRATE'
+IS_STUCK = "IS_STUCK"
 DROPPED_BOMB_THAT_CAN_DESTROY_CRATE = 'DROPPED_BOMB_THAT_CAN_DESTROY_CRATE'  # reward for each crate
-DROPPED_BOMB_WHILE_ENEMY_NEAR = 'DROPPED_BOMB_WHILE_ENEMY_NEAR'  # reward for each enemy
-IS_IN_BOMB_EXPLOSION_RADIUS = 'IS_IN_BOMB_EXPLOSION_RADIUS'  # perhaps differentiate between enemy and own bombs
-USELESS_BOMB = 'USELESS BOMB'  # no crate or enemy reachable by bomb  # or just punish each dropped bomb and reward usefulness
-TRAPPED_SELF = 'TRAPPED_SELF'  # placed bomb in entrance of dead end with length < 4 and went into dead end -> death imminent. A similar feature for locating trapped enemies could be useful too
-MOVED_IN_BLOCKED_DIRECTION = 'MOVED_IN_BLOCKED_DIRECTION'
-MOVED_BACK_AND_FORTH = 'MOVED_BACK_AND_FORTH'
+DROPPED_BOMB_NEXT_TO_CRATE = "DROPPED_BOMB_NEXT_TO_CRATE"
+DROPPED_BOMB_WHILE_ENEMY_NEAR = 'DROPPED_BOMB_WHILE_ENEMY_NEAR'
+IS_IN_BOMB_EXPLOSION_RADIUS = 'IS_IN_BOMB_EXPLOSION_RADIUS'
+DROPPED_BOMB_NOT_AT_CROSSING = 'DROPPED_BOMB_NOT_AT_CROSSING'  # see is_at_crossing function for the idea behind this
+DID_OPPOSITE_OF_LAST_ACTION = 'DID_OPPOSITE_OF_LAST_ACTION'  # idea: prevent oscillating back and forth
+MOVED_TOWARD_ENEMY_IN_DEAD_END = 'MOVED_TOWARD_ENEMY_IN_DEAD_END'  # see direction_to_enemy_in_dead_end
+DROPPED_BOMB_ON_TRAPPED_ENEMY = 'DROPPED_BOMB_ON_TRAPPED_ENEMY'  # enemy dies for sure, so high reward
+DROPPED_BOMB_NEXT_TO_ENEMY = 'DROPPED_BOMB_NEXT_TO_ENEMY'
+ENTERED_DEAD_END_WHILE_ENEMY_NEARBY = 'ENTERED_DEAD_END_WHILE_ENEMY_NEARBY'
+MOVED_TOWARD_ENEMY_IN_ENDGAME = 'MOVED_TOWARD_ENEMY_IN_ENDGAME'
+MOVED_AWAY_FROM_ENEMY_IN_ENDGAME = 'MOVED_AWAY_FROM_ENEMY_IN_ENDGAME'
 
 def setup_training(self):
     """
@@ -29,6 +33,23 @@ def setup_training(self):
     """
     self.save_frequency = 500 # store a snapshot every n rounds
 
+previous_action = 'WAIT'
+
+
+def followed_direction(one_hot_direction, action):
+    action_to_index = {
+        'RIGHT': 0,
+        'DOWN': 1,
+        'LEFT': 2,
+        'UP': 3
+    }
+    # Check if self_action exists in the mapping and corresponds to the one-hot array
+    if action in action_to_index:
+        action_index = action_to_index[action]
+        return one_hot_direction[action_index] == 1
+    else:
+        return False
+
 def game_events_occurred(self, old_game_state: dict, self_action: str, new_game_state: dict, events: List[str]):
     """
     Called once per step to allow intermediate rewards based on game events.
@@ -37,8 +58,6 @@ def game_events_occurred(self, old_game_state: dict, self_action: str, new_game_
     events relevant to your agent that occurred during the previous step. Consult
     settings.py to see what events are tracked. You can hand out rewards to your
     agent based on these events and your knowledge of the (new) game state.
-
-    This is *one* of the places where you could update your agent.
 
     :param self: This object is passed to all callbacks and you can set arbitrary values.
     :param old_game_state: The state that was passed to the last call of `act`.
@@ -53,32 +72,88 @@ def game_events_occurred(self, old_game_state: dict, self_action: str, new_game_
     old_features = state_to_features(old_game_state)
     new_features = state_to_features(new_game_state)
 
-    #if new_features[7] == 1:
-    #    events.append(IS_IN_BOMB_EXPLOSION_RADIUS)
+    crate_count = old_features['lin_features'][1]
+    # self.logger.info("Crates reachable: " + str(crate_count))
 
-    # Retrieve the precomputed blocked directions and nearest coin direction index from events_pre
-    #blocked = old_features[3:7]
-    #nearest_coin_direction = old_features[8:12]
+    others = old_game_state['others']
+    others = [t[3] for t in others]
 
-    _, _, _, (x1, y1) = old_game_state['self']
-    _, _, _, (x2, y2) = new_game_state['self']
-    new_position = (x2, y2)
+    if self_action == 'BOMB':
+        bomb_position = old_game_state['self'][3]
 
-    old_coin = get_nearest_objects(old_features['conv_features'][0], old_game_state['coins'])
-    new_coin = get_nearest_objects(new_features['conv_features'][0], new_game_state['coins'])
+        # Check adjacent tiles for crates
+        x, y = bomb_position
+        adjacent_positions = [(x - 1, y), (x + 1, y), (x, y - 1), (x, y + 1)]
 
-    if old_features['conv_features'][0][old_coin[0][0], old_coin[0][1]] > new_features['conv_features'][0][new_coin[0][0], new_coin[0][1]]:
-       events.append(MOVED_TOWARD_COIN)
-    else:
-       events.append(MOVED_AWAY_FROM_COIN)
+        crate_adjacent = False
+        for pos in adjacent_positions:
+            if old_game_state['field'][pos] == 1:
+                crate_adjacent = True
+                break
+        if crate_adjacent:
+            events.append(DROPPED_BOMB_NEXT_TO_CRATE)  # we only want this event one time
 
-    # Update the last positions deque
-    self.last_positions.append(new_position)
+        if crate_count > 0:
+            for i in range(crate_count):
+                events.append(DROPPED_BOMB_THAT_CAN_DESTROY_CRATE)
 
-    # Check if the agent is moving back and forth
-    if len(self.last_positions) > 2:
-        if self.last_positions[0] == self.last_positions[2]:
-            events.append(MOVED_BACK_AND_FORTH)
+        _, _, _, (ax, ay) = old_game_state['self']
+        if len(others):
+            for (ox, oy) in others:
+                if abs(ax - ox) + abs(ay - oy) < 4:
+                    events.append(DROPPED_BOMB_WHILE_ENEMY_NEAR)
+                    if abs(ax - ox) + abs(ay - oy) < 3:
+                        events.append(DROPPED_BOMB_WHILE_ENEMY_NEAR)  # higher reward for dropping it closer
+
+        if old_features['lin_features'][40] == 0:
+            events.append(DROPPED_BOMB_NOT_AT_CROSSING)
+
+        if old_features['lin_features'][51] == 1:
+            events.append(DROPPED_BOMB_ON_TRAPPED_ENEMY)
+
+        if old_features['lin_features'][52] == 1:
+            events.append(DROPPED_BOMB_NEXT_TO_ENEMY)
+
+    if new_features['lin_features'][2] == 1:
+        events.append(IS_IN_BOMB_EXPLOSION_RADIUS)
+
+    if new_features['lin_features'][3] == 1:
+        events.append(IS_STUCK)
+
+    if followed_direction(old_features['lin_features'][47:51], self_action):
+        events.append(MOVED_TOWARD_ENEMY_IN_DEAD_END)
+    self.logger.info("Dead end features: " + str(new_features['lin_features'][47:52]))
+
+    global previous_action
+    if (self_action == 'UP' and previous_action == 'DOWN') or (self_action == 'DOWN' and previous_action == 'UP') or \
+            (self_action == 'LEFT' and previous_action == 'RIGHT') or (
+            self_action == 'RIGHT' and previous_action == 'LEFT'):
+        events.append(DID_OPPOSITE_OF_LAST_ACTION)
+    self.logger.info("Previous action: " + previous_action)
+    self.logger.info("Current action: " + self_action)
+    previous_action = self_action
+
+    crates_left = old_features['lin_features'][26]
+    if crates_left:
+        if followed_direction(old_features['lin_features'][8:12], self_action):
+            events.append(MOVED_TOWARD_CRATE)
+
+        # there can only be dead ends if there are crates left:
+        if followed_direction(old_features['lin_features'][53:57], self_action):
+            events.append(ENTERED_DEAD_END_WHILE_ENEMY_NEARBY)
+
+    self.logger.info("Disallowed actions: " + str(new_features['lin_features'][20:26]))
+
+    if new_game_state['step'] > 200 and len(others):
+        if followed_direction(old_features['lin_features'][28:32], self_action) or followed_direction(old_features['lin_features'][32:36], self_action) \
+                or followed_direction(old_features['lin_features'][32:36], self_action):
+            events.append(MOVED_TOWARD_ENEMY_IN_ENDGAME)
+        else:
+            events.append(MOVED_AWAY_FROM_ENEMY_IN_ENDGAME)
+
+        if followed_direction(old_features['lin_features'][8:12], self_action):
+            # again here to increase the incentive of moving toward crates when there are few left
+            events.append(MOVED_TOWARD_CRATE)
 
 
     self.model.store_transition(old_features, new_features, Action.from_str(self_action),
@@ -93,11 +168,6 @@ def end_of_round(self, last_game_state: dict, last_action: str, events: List[str
 
     This is similar to game_events_occurred. self.events will contain all events that
     occurred during your agent's final step.
-
-    This is *one* of the places where you could update your agent.
-    This is also a good place to store an agent that you updated.
-
-    :param self: The same object that is passed to all of your callbacks.
     """
     self.logger.debug(f'Encountered event(s) {", ".join(map(repr, events))} in final step')
 
@@ -127,38 +197,36 @@ def end_of_round(self, last_game_state: dict, last_action: str, events: List[str
 
 def reward_from_events(self, events: List[str]) -> int:
     """
-    *This is not a required function, but an idea to structure your code.*
-
-    Here you can modify the rewards your agent get so as to en/discourage
-    certain behavior.
+    Here you can modify the rewards your agent get to en/discourage certain behavior.
     """
     game_rewards = {
-        e.MOVED_UP: 0,#-0.01,
-        e.MOVED_DOWN: 0,#-0.01,
-        e.MOVED_LEFT: 0,#-0.01,
-        e.MOVED_RIGHT: 0,#-0.01,
+        e.MOVED_UP: -0.1,
+        e.MOVED_DOWN: -0.1,
+        e.MOVED_LEFT: -0.1,
+        e.MOVED_RIGHT: -0.1,
         e.WAITED: -0.3,
-        e.COIN_COLLECTED: 5,
-        e.KILLED_OPPONENT: 0,#5,
-        e.KILLED_SELF: -5,#-15,
-        e.COIN_FOUND: 0,#1,  # Crate destroyed that contains coin
+        e.COIN_COLLECTED: 6,
+        e.KILLED_OPPONENT: 5,
+        e.KILLED_SELF: -5,
         e.GOT_KILLED: -5,
-        e.INVALID_ACTION: -0.3,#-0.5,
-        e.OPPONENT_ELIMINATED: 0,#3,
-        e.SURVIVED_ROUND: 0,#7.5,
-        e.BOMB_DROPPED: 0,#-0.5,
-        MOVED_TOWARD_COIN: 0.3,
-        MOVED_AWAY_FROM_COIN: -0.3,
-        # MOVED_TOWARD_CRATE: 0.1,  # todo
-        MOVED_IN_BLOCKED_DIRECTION: 0,#-0.5,
-        # DROPPED_BOMB_THAT_CAN_DESTROY_CRATE: 0.2,  # reward per crate that the bomb can reach  # todo
-        # DROPPED_BOMB_WHILE_ENEMY_NEAR: 0.4,  # todo
-        IS_IN_BOMB_EXPLOSION_RADIUS: 0,#-0.5,
-        MOVED_BACK_AND_FORTH: 0,#-0.75
+        e.INVALID_ACTION: -1,
+        e.OPPONENT_ELIMINATED: 2.5,
+        e.BOMB_DROPPED: -0.5,
+        e.SURVIVED_ROUND: 5,
+        DROPPED_BOMB_THAT_CAN_DESTROY_CRATE: 0.4,  # reward per crate that the bomb can reach
+        DROPPED_BOMB_WHILE_ENEMY_NEAR: 2,
+        IS_STUCK: -0.5,
+        MOVED_TOWARD_CRATE: 0.1,
+        DROPPED_BOMB_NEXT_TO_CRATE: 1,
+        DROPPED_BOMB_NOT_AT_CROSSING: -1,
+        DID_OPPOSITE_OF_LAST_ACTION: -0.3,
+        MOVED_TOWARD_ENEMY_IN_DEAD_END: 1,
+        DROPPED_BOMB_ON_TRAPPED_ENEMY: 9,  # enemy dies (almost) for sure
+        DROPPED_BOMB_NEXT_TO_ENEMY: 4,
+        ENTERED_DEAD_END_WHILE_ENEMY_NEARBY: -1.5,
+        MOVED_TOWARD_ENEMY_IN_ENDGAME: 0.4,
+        MOVED_AWAY_FROM_ENEMY_IN_ENDGAME: -0.3
     }
-    reward_sum = 0
-    for event in events:
-        if event in game_rewards:
-            reward_sum += game_rewards[event]
+    reward_sum = sum(game_rewards[event] for event in events if event in game_rewards)
     self.logger.info(f"Awarded {reward_sum} for events {', '.join(events)}")
     return reward_sum

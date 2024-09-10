@@ -19,7 +19,6 @@ def setup(self):
 
     :param self: This object is passed to all callbacks, and you can set arbitrary values.
     """
-    self.last_positions = deque(maxlen=3)
 
     # load specific snapshot of model; if set to zero, the default (model/model.pt) will be loaded
     # note that training from a snapshot n will save new snapshots as n+10, n+20 etc., thus overriding some of the previous snapshots

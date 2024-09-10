@@ -126,7 +126,7 @@ class Agent:
         self.batch_size = batch_size
 
         # initialize model
-        feature_dims = { 'channels': 9, 'height': 17, 'width': 17, 'linear': 1, 'out': 6}
+        feature_dims = { 'channels': 9, 'height': 17, 'width': 17, 'linear': 57, 'out': 6 }
         self.Q_eval = DeepQNetwork(feature_dims)
 
         # initialize memory
@@ -308,16 +308,16 @@ def state_symmetries(state_batch, new_state_batch, action_batch):
 
     # -> define map onehot encoded directions of linear features here
     lin_onehot_maps = [
-        {Direction.UP:  5,  Direction.DOWN:  6, Direction.LEFT:  7, Direction.RIGHT:  8 },
-        {Direction.UP:  9,  Direction.DOWN: 10, Direction.LEFT: 11, Direction.RIGHT: 12 },
-        {Direction.UP: 13,  Direction.DOWN: 14, Direction.LEFT: 15, Direction.RIGHT: 16 },
-        {Direction.UP: 17,  Direction.DOWN: 18, Direction.LEFT: 19, Direction.RIGHT: 20 },
-        {Direction.UP: 21+Action.UP, Direction.DOWN: 21+Action.DOWN, Direction.LEFT: 21+Action.LEFT, Direction.RIGHT:  21+Action.RIGHT },
-        {Direction.UP: 29,  Direction.DOWN: 30, Direction.LEFT: 31, Direction.RIGHT: 32},
-        {Direction.UP: 33,  Direction.DOWN: 34, Direction.LEFT: 35, Direction.RIGHT: 36},
-        {Direction.UP: 37,  Direction.DOWN: 38, Direction.LEFT: 39, Direction.RIGHT: 40},
-        {Direction.UP: 42+Action.UP, Direction.DOWN: 42+Action.DOWN, Direction.LEFT: 42+Action.LEFT, Direction.RIGHT: 42+Action.RIGHT},
-        {Direction.UP: 48,  Direction.DOWN: 49, Direction.LEFT: 50, Direction.RIGHT: 51},
+        {Direction.UP:  4,  Direction.DOWN:  5, Direction.LEFT:  7, Direction.RIGHT:  8 },
+        {Direction.UP:  8,  Direction.DOWN:  9, Direction.LEFT: 10, Direction.RIGHT: 11 },
+        {Direction.UP: 12,  Direction.DOWN: 13, Direction.LEFT: 14, Direction.RIGHT: 15 },
+        {Direction.UP: 16,  Direction.DOWN: 17, Direction.LEFT: 18, Direction.RIGHT: 19 },
+        {Direction.UP: 20+Action.UP, Direction.DOWN: 20+Action.DOWN, Direction.LEFT: 20+Action.LEFT, Direction.RIGHT:  20+Action.RIGHT },
+        {Direction.UP: 28,  Direction.DOWN: 29, Direction.LEFT: 30, Direction.RIGHT: 31},
+        {Direction.UP: 32,  Direction.DOWN: 33, Direction.LEFT: 34, Direction.RIGHT: 35},
+        {Direction.UP: 36,  Direction.DOWN: 37, Direction.LEFT: 38, Direction.RIGHT: 39},
+        {Direction.UP: 41+Action.UP, Direction.DOWN: 41+Action.DOWN, Direction.LEFT: 41+Action.LEFT, Direction.RIGHT: 41+Action.RIGHT},
+        {Direction.UP: 47,  Direction.DOWN: 48, Direction.LEFT: 49, Direction.RIGHT: 50},
         {Direction.UP: 53,  Direction.DOWN: 54, Direction.LEFT: 55, Direction.RIGHT: 56},
     ]
 
@@ -440,30 +440,30 @@ def state_to_features(game_state: dict) -> np.array:
     disallowed_actions = get_disallowed_actions(ax, ay, bomb_available, distance_map, direction_map, danger_map, danger_threshold, safety_direction)
 
     # adding features
-    lin_features.append(bomb_available)                                                                     # 1
-    lin_features.append(number_of_crates_reachable(ax, ay, field))                                          # 2
-    lin_features.append(danger_map[ax, ay] > danger_threshold)                                              # 3
-    lin_features.append(is_repeating_actions())                                                             # 4
-    lin_features.extend(nearest_coins_feature(coins, distance_map, direction_map))                          # 5-8
-    lin_features.extend(nearest_crates_feature(crates, distance_map, direction_map))                        # 9-12
-    lin_features.extend(get_free_distances(ax, ay, field))                                                  # 13-16
-    lin_features.extend(onehot_encode_direction(safety_direction))                                          # 17-20
-    lin_features.extend(disallowed_actions)                                                                 # 21-26
-    lin_features.append(float(len(crates) / 135))                                                           # 27
-    lin_features.append(float(game_state['round'] * len(enemies)) / 400)                                    # 28
-    lin_features.extend(enemy_directions_feature(distance_map, direction_map, enemies))                     # 29-40
-    lin_features.append(is_at_crossing(ax, ay))                                                             # 41
-    lin_features.extend(get_last_actions(k=1))                                                              # 42-47
-    lin_features.extend(get_direction_to_trapped_enemy(dead_end_list, distance_map, direction_map))         # 48-51
+    lin_features.append(bomb_available)                                                                     # 0
+    lin_features.append(number_of_crates_reachable(ax, ay, field))                                          # 1
+    lin_features.append(danger_map[ax, ay] > danger_threshold)                                              # 2
+    lin_features.append(is_repeating_actions())                                                             # 3
+    lin_features.extend(nearest_coins_feature(coins, distance_map, direction_map))                          # 4-7
+    lin_features.extend(nearest_crates_feature(crates, distance_map, direction_map))                        # 8-11
+    lin_features.extend(get_free_distances(ax, ay, field))                                                  # 12-15
+    lin_features.extend(onehot_encode_direction(safety_direction))                                          # 16-19
+    lin_features.extend(disallowed_actions)                                                                 # 20-25
+    lin_features.append(float(len(crates) / 135))                                                           # 26
+    lin_features.append(float(game_state['round'] * len(enemies)) / 400)                                    # 27
+    lin_features.extend(enemy_directions_feature(distance_map, direction_map, enemies))                     # 28-39
+    lin_features.append(is_at_crossing(ax, ay))                                                             # 40
+    lin_features.extend(get_last_actions(k=1))                                                              # 41-46
+    lin_features.extend(get_direction_to_trapped_enemy(ax, ay, dead_end_list, distance_map, direction_map)) # 47-51
     lin_features.append(is_next_to_enemy(ax, ay, enemies))                                                  # 52
     lin_features.extend(do_not_enter_dead_end(ax, ay, dead_end_map, dead_end_list, enemies, distance_map))  # 53-56
 
-    conv_features.extend(onehot_encode_direction_map(direction_map))                                        # 1-4
-    conv_features.append(distance_map)                                                                      # 5
-    conv_features.append(crate_map)                                                                         # 6
-    conv_features.append(coin_map)                                                                          # 7
-    conv_features.append(player_map)                                                                        # 8
-    conv_features.append(danger_map)                                                                        # 9
+    conv_features.extend(onehot_encode_direction_map(direction_map))                                        # 0-3
+    conv_features.append(distance_map)                                                                      # 4
+    conv_features.append(crate_map)                                                                         # 5
+    conv_features.append(coin_map)                                                                          # 6
+    conv_features.append(player_map)                                                                        # 7
+    conv_features.append(danger_map)                                                                        # 8
 
     # zoom maps to an area around the agent
     conv_features = [focus_map(ax, ay, full_map, r=-1) for full_map in conv_features]
@@ -488,7 +488,7 @@ def get_distance_map(ax, ay, field, bombs=None, enemies=None):
     :return:        Distance, Gradient, Direction and Crate maps
     """
 
-    blocked = [[row == -1 for value in row] for row in field]
+    blocked = np.array([[value == -1 for value in row] for row in field])
 
     if bombs is not None:
         for bomb in bombs:
@@ -666,7 +666,7 @@ def get_danger_map(distance_map, bombs, explosion_map):
                 danger_map[bx + r*dx, by + r*dy] = max(t + 2, danger_map[bx + r*dx, by + r*dy])
 
     # invert danger to be more meaningful
-    danger_map = [[6 - danger if danger > 0 else 0 for danger in row] for row in danger_map]
+    danger_map = np.array([[6 - danger if danger > 0 else 0 for danger in row] for row in danger_map])
 
     return danger_map
 
@@ -729,10 +729,10 @@ def enemy_directions_feature(distance_map, direction_map, enemies, k=3):
     features = []
     for enemy_direction in [
         onehot_encode_direction(
-            get_direction(enemy, direction_map),
-            scaling=min(np.sqrt(distance_map[enemy]), max_dist)
+            get_direction((ex, ey), direction_map),
+            scaling=min(np.sqrt(distance_map[ex, ey]), max_dist)
         )
-        for enemy in get_nearest_objects(distance_map, enemies, k)
+        for ex, ey in get_nearest_objects(distance_map, enemies, k)
     ]:
         features.extend(enemy_direction)
 
@@ -853,14 +853,14 @@ def get_direction_to_safety(distance_map, direction_map, danger_map, danger_thre
     in the direction of the nearest safe tile, especially useful for avoiding placing a bomb and then
     walking in a dead end waiting for the bomb to blow up. Should also work for escaping enemy bombs.
     """
-    positions = [[(x, y) for y in range(17)] for x in range(17)]
+    positions = [(x, y) for x in range(17) for y in range(17)]
     positions.sort(key=lambda pos: distance_map[pos[0], pos[1]])
 
-    for position in positions:
-        if distance_map[position] > time_limit:
+    for x, y in positions:
+        if distance_map[x, y] > time_limit:
             return Direction.NONE
-        if danger_map[position] < danger_threshold:
-            return direction_map[position]
+        if danger_map[x, y] < danger_threshold:
+            return direction_map[x, y]
 
 def get_disallowed_actions(ax, ay, bomb_available, distance_map, direction_map, danger_map, danger_threshold, safety_direction):
     """
@@ -874,7 +874,7 @@ def get_disallowed_actions(ax, ay, bomb_available, distance_map, direction_map, 
 
     if safety_direction == Direction.NONE:
         # if not in danger, do not walk into danger or wall
-        for direction, (dx, dy) in Direction.deltas():
+        for direction, (dx, dy) in Direction.deltas().items():
             if danger_map[ax + dx, ay + dy] >= danger_threshold or distance_map[ax + dx, ay + dy] == Distance.INFINITE:
                 # Danger or obstacle ahead
                 disallowed[Direction.to_action(direction)] = True
@@ -916,7 +916,7 @@ def get_dead_end_map(field, enemies):
 
         while True:
             open_neighbors = []
-            for _, (dx, dy) in Direction.deltas():
+            for _, (dx, dy) in Direction.deltas().items():
                 nx, ny = current_x + dx, current_y + dy
                 if field[nx, ny] == 0 and (nx, ny) != (prev_x, prev_y):  # Only count open tiles, avoid the previous one
                     open_neighbors.append((nx, ny))
@@ -950,13 +950,13 @@ def get_dead_end_map(field, enemies):
     for x in range(1, 16):
         for y in range(1, 16):
             if field[x, y] == 0:  # Free tile, check for dead end
-                open_neighbors = sum(1 for _, (dx, dy) in Direction.deltas() if field[x + dx, y + dy] == 0)
+                open_neighbors = sum(1 for _, (dx, dy) in Direction.deltas().items() if field[x + dx, y + dy] == 0)
                 if open_neighbors == 1:  # Only one open neighbor indicates a potential dead end entrance
                     is_dead_end(x, y)
 
     return dead_end_map, dead_end_list
 
-def get_direction_to_trapped_enemy(dead_end_list, distance_map, direction_map):
+def get_direction_to_trapped_enemy(ax, ay, dead_end_list, distance_map, direction_map):
     """
     todo: something isn't right here
     If there is the open end of a dead end containing an enemy closer to our agent than the manhattan distance of the
@@ -967,34 +967,35 @@ def get_direction_to_trapped_enemy(dead_end_list, distance_map, direction_map):
     This can then easily be rewarded, enabling the agent to learn this behavior without the need for artificial constraints.
     """
     direction = Direction.NONE
+    can_trap_enemy = 0
 
     # Iterate over each dead end to find one that contains an enemy
     for dead_end in dead_end_list:
-        enemy = dead_end['enemy']
-        if enemy is None:
+        if dead_end['enemy'] is None:
             continue  # No enemy in this dead end, skip
+        ex, ey = dead_end['enemy']
 
         open_end = dead_end['open_end']
         closed_end = dead_end['closed_end']
 
         # Check if the agent is closer to the open end than the enemy is
         agent_to_open_end_dist = distance_map[open_end]
-        enemy_to_open_end_dist = abs(enemy[0] - open_end[0]) + abs(
-            enemy[1] - open_end[1])  # Manhattan distance (ignores curved dead ends)
+        enemy_to_open_end_dist = abs(ex - open_end[0]) + abs(
+            ey - open_end[1])  # Manhattan distance (ignores curved dead ends)
 
         if agent_to_open_end_dist <= enemy_to_open_end_dist:
             # If agent is closer to the open end, find the direction to the enemy
-            direction = get_direction(enemy, direction_map)
+            direction = get_direction((ex, ey), direction_map)
 
             # Check if the agent can trap the enemy with a bomb (agent is near the closed end)
-            #agent_to_closed_end_dist = distance_map[closed_end]
-            #if agent_to_closed_end_dist <= 3 and \
-            #        (closed_end[0] == ex == ax or closed_end[1] == ey == ay):  # it has to be a straight dead end
-            #    can_trap_enemy = 1
+            agent_to_closed_end_dist = distance_map[closed_end]
+            if agent_to_closed_end_dist <= 3 and \
+                    (closed_end[0] == ex == ax or closed_end[1] == ey == ay):  # it has to be a straight dead end
+                can_trap_enemy = 1
 
             break  # Stop after finding the first valid enemy in a dead end
 
-    return onehot_encode_direction(direction)
+    return onehot_encode_direction(direction) + [can_trap_enemy]
 
 def do_not_enter_dead_end(ax, ay, dead_end_map, dead_end_list, enemies, distance_map):
     """
@@ -1003,21 +1004,23 @@ def do_not_enter_dead_end(ax, ay, dead_end_map, dead_end_list, enemies, distance
     """
     # Iterate through all adjacent tiles around the agent
     if dead_end_map[ax, ay] == 0:  # Not already in dead end
-        for direction, (dx, dy) in Direction.deltas():
+        for direction, (dx, dy) in Direction.deltas().items():
             # Check if this tile is an open end of a dead end
             for dead_end in dead_end_list:
                 if dead_end['open_end'] == (ax + dx, ay + dy):
                     # Check if any enemy is nearby
-                    for enemy in enemies:
-                        if distance_map[enemy] < 5:  # Chose 'within 5 tiles' as nearby
+                    for ex, ey in enemies:
+                        if distance_map[ex, ey] < 5:  # Chose 'within 5 tiles' as nearby
                             return onehot_encode_direction(direction)
 
-def is_next_to_enemy(ax, ay, others, d=1):
+    return onehot_encode_direction(Direction.NONE)
+
+def is_next_to_enemy(ax, ay, enemies, d=1):
     """
     Checks if the agent is adjacent (d=1) or close to any enemy.
     Can be used to reward attacking enemy agents when they are close.
     """
-    for ex, ey in others:
+    for ex, ey in enemies:
         if abs(ax - ex) + abs(ay - ey) == d:
             return True
 
