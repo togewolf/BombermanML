@@ -40,6 +40,10 @@ class Direction:
     DOWN = 2
 
     @classmethod
+    def deltas(d):
+        return {d.LEFT: (-1, 0), d.RIGHT: (1, 0), d.UP: (0, -1), d.DOWN: (0, 1)}
+
+    @classmethod
     def from_action(d, action):
         direction_map = {
             Action.RIGHT:   d.RIGHT,
