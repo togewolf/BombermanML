@@ -1031,9 +1031,7 @@ Can get trapped between two bombs/surrounded by other agents - add function/feat
 
 
 
-Agent skills that could be improved and how:
-
-The agent does not seem motivated to move toward and blow up crates later in the game
+How to make the agent better aside from that:
 
 Somehow reward blocking enemies and causing them to kill themselves
 
@@ -1045,19 +1043,16 @@ try significantly increasing the batch size. Result: 100% cpu usage an noisy com
 
 experiment: add many layers and see what happens
 
-check whether all rewards always work as they are supposed to and do not somehow cause the agent to learn
-unwanted stuff such as the oscillation behavior
-
 Why exactly does performance decrease after some amount of training steps? Why the periodic ups and downs?
 
 
 Usability:
 
+Code cleanup! Make the code more similar to Oles version
+
+Remove unneeded functions
+
 How can the training process be accelerated? Add logger statements for what functions need lots of time.
-supposition: it is the function of immortality
-
-Code cleanness: Make the code more similar to Oles version
-
-Save more stuff in csv such as cumulative training reward per round, kills, suicides, save all in one single csv file
+supposition: it is the function of immortality / calculating the distance map twice with and without bombs and enemies
 
 """
