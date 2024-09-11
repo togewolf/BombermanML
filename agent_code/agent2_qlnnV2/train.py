@@ -11,19 +11,15 @@ ACTION_MAP = {action: idx for idx, action in enumerate(ACTIONS)}
 
 # Events
 MOVED_TOWARD_CRATE = 'MOVED_TOWARD_CRATE'
-IS_STUCK = "IS_STUCK"
+IS_REPEATING_ACTIONS = "IS_REPEATING_ACTIONS"
 DROPPED_BOMB_THAT_CAN_DESTROY_CRATE = 'DROPPED_BOMB_THAT_CAN_DESTROY_CRATE'  # reward for each crate
 DROPPED_BOMB_NEXT_TO_CRATE = "DROPPED_BOMB_NEXT_TO_CRATE"
 DROPPED_BOMB_WHILE_ENEMY_NEAR = 'DROPPED_BOMB_WHILE_ENEMY_NEAR'
-IS_IN_BOMB_EXPLOSION_RADIUS = 'IS_IN_BOMB_EXPLOSION_RADIUS'
 DROPPED_BOMB_NOT_AT_CROSSING = 'DROPPED_BOMB_NOT_AT_CROSSING'  # see is_at_crossing function for the idea behind this
 DID_OPPOSITE_OF_LAST_ACTION = 'DID_OPPOSITE_OF_LAST_ACTION'  # idea: prevent oscillating back and forth
-MOVED_TOWARD_ENEMY_IN_DEAD_END = 'MOVED_TOWARD_ENEMY_IN_DEAD_END'  # see direction_to_enemy_in_dead_end
+FOLLOWED_DIRECTION_SUGGESTION = 'FOLLOWED_DIRECTION_SUGGESTION'  # see direction_to_enemy_in_dead_end
 DROPPED_BOMB_ON_TRAPPED_ENEMY = 'DROPPED_BOMB_ON_TRAPPED_ENEMY'  # enemy dies for sure, so high reward
 DROPPED_BOMB_NEXT_TO_ENEMY = 'DROPPED_BOMB_NEXT_TO_ENEMY'
-ENTERED_DEAD_END_WHILE_ENEMY_NEARBY = 'ENTERED_DEAD_END_WHILE_ENEMY_NEARBY'
-MOVED_TOWARD_ENEMY_IN_ENDGAME = 'MOVED_TOWARD_ENEMY_IN_ENDGAME'
-MOVED_AWAY_FROM_ENEMY_IN_ENDGAME = 'MOVED_AWAY_FROM_ENEMY_IN_ENDGAME'
 
 
 def setup_training(self):
@@ -112,28 +108,25 @@ def game_events_occurred(self, old_game_state: dict, self_action: str, new_game_
                     if abs(ax - ox) + abs(ay - oy) < 3:
                         events.append(DROPPED_BOMB_WHILE_ENEMY_NEAR)  # higher reward for dropping it closer
 
-        if old_features[40] == 0:
+        if old_features[26] == 0:
             events.append(DROPPED_BOMB_NOT_AT_CROSSING)
 
-        if old_features[51] == 1:
+        if old_features[33] == 1:
             events.append(DROPPED_BOMB_ON_TRAPPED_ENEMY)
 
-        if old_features[52] == 1:
+        if old_features[34] == 1:
             events.append(DROPPED_BOMB_NEXT_TO_ENEMY)
 
     else:
-        if old_features[52] == 1:
+        if old_features[33] == 1:
             self.logger.info("Did not drop bomb on trapped enemy")
 
-    if new_features[2] == 1:
-        events.append(IS_IN_BOMB_EXPLOSION_RADIUS)
-
     if new_features[3] == 1:
-        events.append(IS_STUCK)
+        events.append(IS_REPEATING_ACTIONS)
 
-    if followed_direction(old_features[47:51], self_action):
-        events.append(MOVED_TOWARD_ENEMY_IN_DEAD_END)
-    self.logger.info("Dead end features: " + str(new_features[47:52]))
+    if followed_direction(old_features[4:8], self_action):
+        events.append(FOLLOWED_DIRECTION_SUGGESTION)
+    self.logger.info("Direction suggestion: " + str(new_features[4:8]))
 
     global previous_action
     if (self_action == 'UP' and previous_action == 'DOWN') or (self_action == 'DOWN' and previous_action == 'UP') or \
@@ -145,19 +138,6 @@ def game_events_occurred(self, old_game_state: dict, self_action: str, new_game_
     previous_action = self_action
 
     self.logger.info("Disallowed actions: " + str(new_features[20:26]))
-
-    if new_game_state['step'] > 200 and len(others):
-        if followed_direction(old_features[28:32], self_action) or followed_direction(old_features[32:36], self_action) \
-                or followed_direction(old_features[32:36], self_action):
-            events.append(MOVED_TOWARD_ENEMY_IN_ENDGAME)
-        else:
-            events.append(MOVED_AWAY_FROM_ENEMY_IN_ENDGAME)
-
-        if followed_direction(old_features[8:12], self_action):
-            # again here to increase the incentive of moving toward crates when there are few left
-            crates_left = 0 < old_features[26]
-            if crates_left:
-                events.append(MOVED_TOWARD_CRATE)
 
     reward = reward_from_events(self, events)
     self.cumulative_reward += reward
@@ -232,12 +212,12 @@ def reward_from_events(self, events: List[str]) -> int:
     Here you can modify the rewards your agent get to en/discourage certain behavior.
     """
     game_rewards = {
-        e.MOVED_UP: -0.1,
-        e.MOVED_DOWN: -0.1,
-        e.MOVED_LEFT: -0.1,
-        e.MOVED_RIGHT: -0.1,
-        e.WAITED: -0.3,
-        e.COIN_COLLECTED: 8,
+        e.MOVED_UP: -0.2,
+        e.MOVED_DOWN: -0.2,
+        e.MOVED_LEFT: -0.2,
+        e.MOVED_RIGHT: -0.2,
+        e.WAITED: -0.5,
+        e.COIN_COLLECTED: 5,
         e.KILLED_OPPONENT: 5,
         e.KILLED_SELF: -5,
         e.GOT_KILLED: -5,
@@ -247,17 +227,13 @@ def reward_from_events(self, events: List[str]) -> int:
         e.SURVIVED_ROUND: 5,
         DROPPED_BOMB_THAT_CAN_DESTROY_CRATE: 0.4,  # reward per crate that the bomb can reach
         DROPPED_BOMB_WHILE_ENEMY_NEAR: 2,
-        IS_STUCK: -0.5,
-        MOVED_TOWARD_CRATE: 0.5,
+        IS_REPEATING_ACTIONS: -0.5,
         DROPPED_BOMB_NEXT_TO_CRATE: 1,
         DROPPED_BOMB_NOT_AT_CROSSING: -0.5,
         DID_OPPOSITE_OF_LAST_ACTION: -0.3,
-        MOVED_TOWARD_ENEMY_IN_DEAD_END: 1,
+        FOLLOWED_DIRECTION_SUGGESTION: 0.5,
         DROPPED_BOMB_ON_TRAPPED_ENEMY: 9,  # enemy dies (almost) for sure
-        DROPPED_BOMB_NEXT_TO_ENEMY: 4,
-        ENTERED_DEAD_END_WHILE_ENEMY_NEARBY: -1.5,
-        MOVED_TOWARD_ENEMY_IN_ENDGAME: 0.4,
-        MOVED_AWAY_FROM_ENEMY_IN_ENDGAME: -0.3
+        DROPPED_BOMB_NEXT_TO_ENEMY: 3,
     }
     reward_sum = sum(game_rewards[event] for event in events if event in game_rewards)
     self.logger.info(f"Awarded {reward_sum} for events {', '.join(events)}")
