@@ -106,7 +106,7 @@ class Agent:
 
     def choose_action(self, game_state, train):
         features = state_to_features(game_state, self.logger)
-        blocked = features[20:26]  # [0,0,0,0,0,0]
+        blocked = features[8:14]  # [0,0,0,0,0,0]
 
         if np.random.random() > self.epsilon or not train:
             state = torch.tensor([features], dtype=torch.float32).to(self.Q_eval.device)
@@ -236,6 +236,10 @@ def state_to_features(game_state: dict, logger) -> np.array:
     blocked = disallowed_actions(game_state, danger_zone, others, bombs, dist_t, grad_t, nearest_safe_t, dend_map,
                                  dend_list, logger)
 
+    edad = enemies_distances_and_directions(dist, others, grad)
+
+    dteide = direction_to_enemy_in_dead_end(ax, ay, dend_list, dist, grad, dist_t)
+
     # logger.info("In danger: " + str(in_danger))
     # logger.info(danger_zone)
     # logger.info("Distances to nearest safe tiles: " + str(nearest_safe))
@@ -252,24 +256,39 @@ def state_to_features(game_state: dict, logger) -> np.array:
     features.append(crates_reachable(ax, ay, field))  # feat 1
     features.append(in_danger)  # feat 2
     features.append(is_repeating_actions())  # feat 3
-    features.extend(k_nearest_coins_feature(dist, coins, grad, k=1))  # feat 4-7
-    features.extend(nearest_crate_feature(field, dist, crates, grad, k=1))  # feat 8-11
-    features.extend(free_distance(ax, ay, field))  # 12-15
-    features.extend(nearest_safe)  # 16-19
-    features.extend(blocked)  # 20-25
-    features.append(float(len(crates) / 135))  # 26 How many crates are left represented as a float between 0 and 1
-    features.append(
-        float(game_state['round'] * len(others)) / 400)  # 27 Idea: learn to become more aggressive toward the end
-    features.extend(enemies_distances_and_directions(dist, others, grad))  # 28-39
-    features.append(is_at_crossing(ax, ay))  # 40
-    features.extend(last_action())  # 41-46
-    features.extend(direction_to_enemy_in_dead_end(ax, ay, dend_list, dist, grad, dist_t))  # 47-512
-    features.append(int(is_next_to_enemy(ax, ay, others)))  # 52
-    features.extend(neighboring_explosions(ax, ay, danger_zone))  # 53 - 57
-    # features.append(0)  # test
-    # features.extend(neighboring(ax, ay, game_state))  # 26-51  # todo perhaps a separate convolutional subnetwork for th
+    features.extend(direction_suggestion(field, coins, crates, others, dist_t, grad_t, dist, grad, dteide))  # feat 4-7
+    features.extend(blocked)  # 8-13
+    features.extend(edad)  # 14-25
+    features.append(is_at_crossing(ax, ay))  # 26
+    features.extend(last_action())  # 27-32
+    features.append(dteide[4])  # 33 whether it can trap the enemy
+    features.append(int(is_next_to_enemy(ax, ay, others)))  # 34
+    features.extend(neighboring_explosions(ax, ay, danger_zone))  # 35-39
 
     return features
+
+
+def direction_suggestion(field, coins, crates, others, dist_t, grad_t, dist, grad, dteide):
+    """
+    Selects a goal tile: trappable enemy, coin, crate, enemy in order of decreasing importance.
+    The agent is rewarded for following the directions, but not forced.
+    Returns a one-hot direction vector and a bool, whether it can drop a bomb on a trapped enemy,
+    which is used as a separate feature.
+    """
+    suggestion = [0] * 4
+
+    if any(dteide):  # there is a trappable enemy nearby
+        suggestion = dteide[:4]
+    else:
+        if len(coins):
+            suggestion = k_nearest_coins_feature(dist_t, coins, grad_t)
+        else:
+            if len(crates):
+                suggestion = nearest_crate_feature(field, dist_t, crates, grad_t)
+            elif len(others):
+                suggestion = nearest_enemy(dist, others, grad)
+
+    return suggestion
 
 
 def k_nearest_coins_feature(dist, coins, grad, k=1):
@@ -323,6 +342,28 @@ def nearest_crate_feature(field, dist, crates, grad, k=1):
             int(direction == dUP) * np.sqrt(dist[crate])
         ]
         features.extend(direction_one_hot)
+
+    return features
+
+
+def nearest_enemy(dist, others, grad):
+    """
+    :returns the direction to the nearest enemy as one-hot
+    """
+
+    if not len(others):
+        return [0, 0, 0, 0]
+
+    enemy = nearest_objects(dist, others)
+    features = []
+    direction = direction_to_object(enemy[0], grad)
+    direction_one_hot = [
+        int(direction == dRIGHT),
+        int(direction == dDOWN),
+        int(direction == dLEFT),
+        int(direction == dUP),
+    ]
+    features.extend(direction_one_hot)
 
     return features
 
@@ -871,6 +912,7 @@ def dead_end_map(field, others, bombs):
 
 
 def direction_to_enemy_in_dead_end(ax, ay, dead_end_list, dist, grad, dist_t):
+    # todo fix: agent does not get the reward
     """
     If there is the open end of a dead end containing an enemy closer to our agent than the manhattan distance of the
     enemy to the open end, return one-hot directions to the enemy.
@@ -994,12 +1036,6 @@ Agent skills that could be improved and how:
 The agent does not seem motivated to move toward and blow up crates later in the game
 
 Somehow reward blocking enemies and causing them to kill themselves
-
-Idea: choose direction the agent is supposed to go (trapped_enemy, coin, crate, enemy) 
-depending on the distances and the overall game state
-and reward the agent for following direction -> a merger of multiple other features
-
-thusly throw out as many unnecessary features as possible
 
 
 
