@@ -22,6 +22,10 @@ def setup(self):
     # load specific snapshot of model; if set to zero, the default (model/model.pt) will be loaded
     # note that training from a snapshot n will save new snapshots as n+10, n+20 etc., thus overriding some of the previous snapshots
     self.start_from_snapshot = 0
+    self.cumulative_reward = 0
+    self.kills = 0
+    self.suicides = 0
+    self.opponents_eliminated = 0
 
     model_filename = 'model/model.pt' if self.start_from_snapshot == 0 else 'model/snapshots/model-' + str(self.start_from_snapshot) + '.pt'
 
