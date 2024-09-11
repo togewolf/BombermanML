@@ -288,6 +288,8 @@ def direction_suggestion(field, coins, crates, others, dist_t, grad_t, dist, gra
             elif len(others):
                 suggestion = nearest_enemy(dist, others, grad)
 
+    # todo: if suggestion is still 0 here, this means our agent is the only thing left on the map. Do a victory dance.
+
     return suggestion
 
 
@@ -1033,7 +1035,22 @@ Can get trapped between two bombs/surrounded by other agents - add function/feat
 
 How to make the agent better aside from that:
 
+Improve suggested direction features: 
+do not suggest direction to coin if it is not reachable due to crates / another agent is much closer to it
+
+Improve nearest_crate feature: point toward location with most reachable crates, but with distance tradeoff
+crates_reachable is then not needed as an additional feature anymore
+
+Check whether dead end stuff works now, force it to drop a bomb if it can certainly kill an enemy
+
 Somehow reward blocking enemies and causing them to kill themselves
+
+Things our features are just not good enough for, yet:
+- prioritizing coins (prefer to collect those that would be collected by an enemy if the agent collected another first)
+- getting kills in complex multi-agent situations (make agent locations and directions better by not making each a
+    one-hot, instead there should always be 2 non zero-values, the relative coordinates.)
+- prioritizing attacking 'weak' enemies - there will be teams with bad implementations we could farm points off of
+    example: agent does not move -> keep location history of other agents and move toward "braindead" agents
 
 
 
