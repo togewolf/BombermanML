@@ -51,9 +51,9 @@ class DeepQNetwork(nn.Module):
             nn.Linear(2048, 1024),
             nn.Linear(1024, 512),
             nn.Linear(512, 256),
-            nn.Linear(256, 12),
+            nn.Linear(256, 32),
         ])
-        self.out = nn.Linear(12, dims['out'])
+        self.out = nn.Linear(32, dims['out'])
 
         self.pool = nn.MaxPool2d(1, 1)
         self.dropout = nn.Dropout(p=dropout_rate)
@@ -864,6 +864,7 @@ def get_direction_to_safety(distance_map, direction_map, danger_map, danger_thre
 
 def get_disallowed_actions(ax, ay, bomb_available, distance_map, direction_map, danger_map, danger_threshold, safety_direction):
     """
+    todo: allow multiple safe directions
     can be used as feature or to block those actions in the choose_action function
     that would lead to certain death
     """

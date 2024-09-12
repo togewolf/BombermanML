@@ -4,8 +4,8 @@ import os
 import csv
 
 import events as e
-from .dqlnn_model import state_to_features, get_nearest_objects
-from .utils import Action
+from .dqlnn_model import state_to_features, onehot_encode_direction
+from .utils import Action, Direction
 
 # Events
 MOVED_TOWARD_CRATE = 'MOVED_TOWARD_CRATE'
@@ -36,19 +36,8 @@ def setup_training(self):
 previous_action = 'WAIT'
 
 
-def followed_direction(one_hot_direction, action):
-    action_to_index = {
-        'RIGHT': 0,
-        'DOWN': 1,
-        'LEFT': 2,
-        'UP': 3
-    }
-    # Check if self_action exists in the mapping and corresponds to the one-hot array
-    if action in action_to_index:
-        action_index = action_to_index[action]
-        return one_hot_direction[action_index] == 1
-    else:
-        return False
+def followed_direction(direction_feature, action):
+    return onehot_encode_direction(Direction.from_action(Action.from_str(action))) == direction_feature
 
 def game_events_occurred(self, old_game_state: dict, self_action: str, new_game_state: dict, events: List[str]):
     """
