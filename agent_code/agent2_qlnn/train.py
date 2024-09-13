@@ -31,7 +31,6 @@ def setup_training(self):
 
     :param self: This object is passed to all callbacks and you can set arbitrary values.
     """
-    self.save_frequency = 500 # store a snapshot every n rounds
 
 previous_action = 'WAIT'
 
@@ -58,8 +57,8 @@ def game_events_occurred(self, old_game_state: dict, self_action: str, new_game_
     if not old_game_state:
         return
 
-    old_features = state_to_features(old_game_state)
-    new_features = state_to_features(new_game_state)
+    old_features = state_to_features(old_game_state, *self.agent.get_history())
+    new_features = state_to_features(new_game_state, *self.agent.get_history())
 
     crate_count = old_features['lin_features'][1]
     # self.logger.info("Crates reachable: " + str(crate_count))
@@ -145,9 +144,9 @@ def game_events_occurred(self, old_game_state: dict, self_action: str, new_game_
             events.append(MOVED_TOWARD_CRATE)
 
 
-    self.model.store_transition(old_features, new_features, Action.from_str(self_action),
+    self.agent.memory.store_transition(old_features, new_features, Action.from_str(self_action),
                                 reward_from_events(self, events), done=False)
-    self.model.learn()
+    self.agent.learn()
 
 
 def end_of_round(self, last_game_state: dict, last_action: str, events: List[str]):
@@ -160,27 +159,18 @@ def end_of_round(self, last_game_state: dict, last_action: str, events: List[str
     """
     self.logger.debug(f'Encountered event(s) {", ".join(map(repr, events))} in final step')
 
-    self.model.store_transition(state_to_features(last_game_state), None, Action.from_str(last_action),
+    self.agent.memory.store_transition(state_to_features(last_game_state, *self.agent.get_history()), None, Action.from_str(last_action),
                                 reward_from_events(self, events), done=True)
-    self.model.learn(end_epoch=True)
-
-    # save snapshot of the model
-    os.makedirs('model/snapshots', exist_ok=True)
-    if self.model.epoch % self.save_frequency == 0:
-        with open('model/snapshots/model-' + str(self.model.epoch) + '.pt', 'wb') as file:
-            pickle.dump(self.model, file)
+    self.agent.learn(end_epoch=True)
+    self.agent.clear_history()
+    self.agent.save_to_file()
 
     # write scores to csv file
     score = last_game_state['self'][1]
 
-
     with open('model/scores.csv', mode='a', newline='') as file:
         writer = csv.writer(file)
         writer.writerow([score])
-
-    # Store the model
-    with open('model/model.pt', 'wb') as file:
-        pickle.dump(self.model, file)
 
 
 

@@ -1,3 +1,4 @@
+import os
 import torch
 import torch.nn as nn
 import torch.optim as optim
@@ -10,7 +11,7 @@ from .utils import Direction, Distance, Action
 
 
 class DeepQNetwork(nn.Module):
-    def __init__(self, dims, dropout_rate=0.3, lr=1e-4):
+    def __init__(self, dims, hyperparameters):
         """
         Defines the models' architecture:
 
@@ -29,14 +30,17 @@ class DeepQNetwork(nn.Module):
         self.scheduler: Adjusts lr over time, see https://pytorch.org/docs/stable/optim.html#how-to-adjust-learning-rate
 
         :param dims:            Input/Output dimensions defined in Agent
-        :param dropout_rate:    Rate at which neurons are randomly disabled during training to make model more stable
-        :param lr:              Rate at which model adapts to data, see scheduler for changing lr over time
+        :param hyperparameters: Dictionary of several hyperparameters that determine the learning behaviour of the model
 
         NOTE: after changing the properties of the input or some convolutional layers the value of `conv_output_dimension` may become incorrect
         raising an error that some matrices' shapes don't match. To fix this change the value of `conv_output_dimension` accordingly
         """
         super(DeepQNetwork, self).__init__()
         # torch.autograd.set_detect_anomaly(True)  # remove when it works
+
+        self.hp = hyperparameters
+        self.iteration = 0
+        self.epoch = 0
 
         self.conv = nn.ModuleList([
             nn.Conv2d(dims['channels'], 16, 3, 1, 1),
@@ -56,18 +60,16 @@ class DeepQNetwork(nn.Module):
         self.out = nn.Linear(32, dims['out'])
 
         self.pool = nn.MaxPool2d(1, 1)
-        self.dropout = nn.Dropout(p=dropout_rate)
+        self.dropout = nn.Dropout(p=self.hp['dropout'])
 
-        self.act = nn.ReLU()
+        self.activ = nn.ReLU()
 
-        self.optimizer = optim.Adam(self.parameters(), lr=lr)
+        self.epsilon = self.hp['epsilon_start']
+
+        self.optimizer = optim.Adam(self.parameters(), lr=self.hp['lr'])
         self.scheduler = scheduler.ExponentialLR(self.optimizer, gamma=0.98)
 
         self.loss = nn.MSELoss()
-        self.device = torch.device('cuda:0' if torch.cuda.is_available() else 'cpu')
-        if not torch.cuda.is_available():
-            print("GPU not found!")
-        self.to(self.device)
 
     def forward(self, state, train):
         """
@@ -79,7 +81,7 @@ class DeepQNetwork(nn.Module):
         """
         x = state['conv_features']
         for conv in self.conv:
-            x = self.act(conv(x))
+            x = self.activ(conv(x))
             x = self.pool(x)
 
         # flatten data and append linear features
@@ -87,65 +89,32 @@ class DeepQNetwork(nn.Module):
         x = torch.cat((x, state['lin_features']), 1)
 
         for lin in self.linear:
-            x = self.act(lin(x))
+            x = self.activ(lin(x))
             if train:
                 x = self.dropout(x)
 
         actions = self.out(x)
         return actions
 
-
-class Agent:
-    def __init__(self, logger, gamma=0.9, epsilon=1.0, eps_dec=1e-2, eps_end=0.1,
-                 batch_size=64, mem_size=100000):
-        """
-        Agent with memory of previous games, a model, and some hyperparameters
-
-        feature_dims: Dictionary defining the dimension of features for the model and memory
-        self.Q_eval: Model that will be trained, see DeepQNetwork.__init__ for more information
-
-        Memory (self.state_memory, self.new_state_memory, self.action_memory, self.reward_memory, self.terminal_memory):
-        - Arrays storing every previous state, new_state, chosen action and reward, used for training the model
-        - All arrays should have the same dimensions, and their elements should correspond to each other as if they were a single array of tuples
-        - State is stored in terms of its features, split into convolutional and linear features
-
-        :param logger:      Logger passed down from game framework
-        :param gamma:       Hyperparameter; Devaluation of future rewards, and thus representing uncertainty of the future, see learn() method
-        :param epsilon:     Hyperparameter; Balance between exploration and exploitation, see choose_action() method
-        :param eps_dec:     Decrease of epsilon hyperparameter every epoch
-        :param eps_end:     Final value of epsilon hyperparameter
-        :param batch_size:  Size of batches used in learning, see learn() method
-        :param mem_size:    Limit of memorized transitions
-        """
-        self.logger = logger
-        self.gamma = gamma
-        self.epsilon = epsilon
-        self.eps_min = eps_end
-        self.eps_dec = eps_dec
+class StateMemory():
+    def __init__(self, feature_dims, batch_size=64, mem_size=100000):
         self.mem_size = mem_size
+        self.mem_cntr = 0
         self.batch_size = batch_size
+        self.conv_dims = [feature_dims['channels'], feature_dims['height'], feature_dims['width']]
+        self.lin_dims = [feature_dims['linear']]
 
-        # initialize model
-        feature_dims = { 'channels': 9, 'height': 17, 'width': 17, 'linear': 57, 'out': 6 }
-        self.Q_eval = DeepQNetwork(feature_dims)
-
-        # initialize memory
         self.state_memory = {
-            'conv_features': np.zeros((self.mem_size, feature_dims['channels'], feature_dims['height'], feature_dims['width']), dtype=np.float32),
-            'lin_features': np.zeros((self.mem_size, feature_dims['linear']), dtype=np.float32),
+            'conv_features': np.zeros((self.mem_size, *self.conv_dims), dtype=np.float32),
+            'lin_features':  np.zeros((self.mem_size, *self.lin_dims),  dtype=np.float32),
         }
         self.new_state_memory = {
-            'conv_features': np.zeros((self.mem_size, feature_dims['channels'], feature_dims['height'], feature_dims['width']), dtype=np.float32),
-            'lin_features': np.zeros((self.mem_size, feature_dims['linear']), dtype=np.float32),
+            'conv_features': np.zeros((self.mem_size, *self.conv_dims), dtype=np.float32),
+            'lin_features':  np.zeros((self.mem_size, *self.lin_dims),  dtype=np.float32),
         }
         self.action_memory = np.zeros(self.mem_size, dtype=np.int32)
         self.reward_memory = np.zeros(self.mem_size, dtype=np.float32)
         self.terminal_memory = np.zeros(self.mem_size, dtype=bool)
-
-        # initialize counters
-        self.mem_cntr = 0
-        self.iteration = 0
-        self.epoch = 0
 
     def store_transition(self, state, new_state, action, reward, done):
         """
@@ -173,38 +142,139 @@ class Agent:
         self.terminal_memory[index] = done
         self.mem_cntr += 1
 
-    def choose_action(self, state, train):
+    def has_enough_data(self):
+        if self.mem_cntr >= self.batch_size:
+            return True
+        else:
+            return False
+
+    def get_batch(self, apply_symmetry):
+        max_mem = min(self.mem_cntr, self.mem_size)
+        batch = np.random.choice(max_mem, self.batch_size, replace=False)
+
+        state_batch = {
+            'conv_features': self.state_memory['conv_features'][batch],
+            'lin_features': self.state_memory['lin_features'][batch]
+        }
+        new_state_batch = {
+            'conv_features': self.new_state_memory['conv_features'][batch],
+            'lin_features': self.new_state_memory['lin_features'][batch]
+        }
+        action_batch = self.action_memory[batch]
+        reward_batch = self.reward_memory[batch]
+        terminal_batch = self.terminal_memory[batch]
+
+        if apply_symmetry:
+            state_batch, new_state_batch, action_batch = state_symmetries(state_batch, new_state_batch, action_batch)
+
+        return state_batch, new_state_batch, action_batch, reward_batch, terminal_batch
+
+class Agent:
+    def __init__(self, logger, model_dir, save_frequency, snapshot=-1):
+        """
+        Agent with memory of previous games, a model, and some hyperparameters
+
+        feature_dims: Dictionary defining the dimension of features for the model and memory
+        self.model: Model that will be trained, see DeepQNetwork.__init__ for more information
+
+        Memory (self.state_memory, self.new_state_memory, self.action_memory, self.reward_memory, self.terminal_memory):
+        - Arrays storing every previous state, new_state, chosen action and reward, used for training the model
+        - All arrays should have the same dimensions, and their elements should correspond to each other as if they were a single array of tuples
+        - State is stored in terms of its features, split into convolutional and linear features
+
+        :param logger:          Logger passed down from game framework
+        :param model_dir:       Location where the model is stored
+        :param save_frequency:  After how many epochs to save a snapshot of the model
+        :param snapshot:        Which snapshot to load initially, -1 to choose the newest snapshot
+        """
+        self.logger = logger
+
+        self.action_history = deque(maxlen=100)
+        self.coordinate_history = deque([], maxlen=20)
+        self.save_frequency = save_frequency
+
+        self.model_dir = model_dir + '/'
+
+        model_file = self.model_dir + ('model.pt' if snapshot < 0 else 'snapshots/model-' + str(snapshot) + '.pt')
+        memory_file = self.model_dir + 'memory.pt'
+
+        self.device = torch.device('cuda:0' if torch.cuda.is_available() else 'cpu')
+        if not torch.cuda.is_available():
+            self.logger.info("GPU not found!")
+
+        feature_dims = { 'channels': 9, 'height': 17, 'width': 17, 'linear': 57, 'out': 6 }
+        hyperparameters = { 'gamma': 0.9, 'dropout': 0.3, 'lr': 1e-4,
+                            'epsilon_start': 1.0, 'epsilon_dec': 1e-2, 'epsilon_min': 0.1 }
+
+        # initialize model
+        if os.path.isfile(model_file):
+            self.logger.info("Loading model from saved state.")
+            self.model = torch.load(model_file, map_location=self.device)
+        else:
+            self.logger.info("Setting up model from scratch.")
+            self.model = DeepQNetwork(feature_dims, hyperparameters)
+        self.model.to(self.device)
+
+        # initialize memory
+        if os.path.isfile(memory_file):
+            self.logger.info("Loading memory from saved state.")
+            self.memory = torch.load(memory_file, map_location=self.device)
+        else:
+            self.logger.info("Setting up memory from scratch.")
+            self.memory = StateMemory(feature_dims)
+
+    def save_to_file(self):
+        os.makedirs(self.model_dir + 'snapshots', exist_ok=True)
+        torch.save(self.model, self.model_dir + 'model.pt')
+
+        if self.model.epoch % self.save_frequency == 0:
+            torch.save(self.memory, self.model_dir + 'memory.pt')
+            torch.save(self.model, self.model_dir + 'snapshots/model-' + str(self.model.epoch) + '.pt')
+
+    def choose_action(self, game_state, state, train):
         """
         Use model to decide on the optimal decision or choose a random exploratory action during training
 
         self.epsilon: Probability that a random action will be chosen, defined in Agents constructor
 
-        :param state:   State the chosen action should act on
-        :param train:   Whether training mode and with that exploration is enabled
-        :return:        Chosen action as index in ACTION array defined in utils.py
+        :param game_state:  Game State that state was calculated from
+        :param state:       State the chosen action should act on
+        :param train:       Whether training mode and with that exploration is enabled
+        :return:            Chosen action as index in ACTION array defined in utils.py
         """
         # epsilon greed
-        if np.random.random() < self.epsilon and train:
+        if np.random.random() < self.model.epsilon and train:
             p = [1, 1, 1, 1, .5, .5]
 
-            self.logger.info("Chose random action (Eps = " + str(self.epsilon) + ")")
+            self.logger.info("Chose random action (Eps = " + str(self.model.epsilon) + ")")
             return random.choices(range(6), weights=p, k=1)[0]
 
+        blocked = state['lin_features'][20:26]
 
         # transfer state to GPU
         state = {
-            'conv_features': torch.tensor(np.array([state['conv_features']]), dtype=torch.float32).to(self.Q_eval.device),
-            'lin_features': torch.tensor(np.array([state['lin_features']]), dtype=torch.float32).to(self.Q_eval.device),
+            'conv_features': torch.tensor(np.array([state['conv_features']]), dtype=torch.float32).to(self.device),
+            'lin_features': torch.tensor(np.array([state['lin_features']]), dtype=torch.float32).to(self.device),
         }
         # use model to evaluate actions, then pick optimal action
-        actions = self.Q_eval.forward(state, train).squeeze()
+        actions = self.model.forward(state, train).squeeze()
         action = torch.argmax(actions).item()
 
         # action_probabilities = actions.clone().detach().softmax(dim=1).squeeze()
         # action = torch.multinomial(action_probabilities, 1).item()
 
-        last_actions_deque.append(action)
+        _, _, _, (ax, ay) = game_state['self']
+        self.coordinate_history.append((ax, ay))
+
+        self.action_history.append(action)
         return action
+
+    def get_history(self):
+        return self.coordinate_history, self.action_history
+
+    def clear_history(self):
+        self.coordinate_history.clear()
+        self.action_history.clear()
 
     def learn(self, end_epoch=False):
         """
@@ -219,67 +289,54 @@ class Agent:
 
         :param end_epoch:   Whether iteration marks the end of an epoch, thus adjusting learning parameters
         """
-        if self.mem_cntr < self.batch_size:
+        if not self.memory.has_enough_data():
             return
 
-        self.Q_eval.optimizer.zero_grad()
+        self.model.optimizer.zero_grad()
 
-        # choose random batch
-        max_mem = min(self.mem_cntr, self.mem_size)
-        batch = np.random.choice(max_mem, self.batch_size, replace=False)
-
-        batch_index = np.arange(self.batch_size, dtype=np.int32)
-
-        # get corresponding state batch
-        state_batch     = { 'conv_features': self.state_memory['conv_features'][batch],     'lin_features': self.state_memory['lin_features'][batch]        }
-        new_state_batch = { 'conv_features': self.new_state_memory['conv_features'][batch], 'lin_features': self.new_state_memory['lin_features'][batch]    }
-        action_batch = self.action_memory[batch]
-        reward_batch = self.reward_memory[batch]
-        terminal_batch = self.terminal_memory[batch]
-
-        # apply symmetry
-        state_batch, new_state_batch, action_batch = state_symmetries(state_batch, new_state_batch, action_batch)
+        # get batches
+        batch_index = np.arange(self.memory.batch_size, dtype=np.int32)
+        state_batch, new_state_batch, action_batch, reward_batch, terminal_batch = self.memory.get_batch(apply_symmetry=True)
 
         # transfer states to GPU
         state_batch = {
-            'conv_features': torch.tensor(np.array(state_batch['conv_features'])).to(self.Q_eval.device),
-            'lin_features': torch.tensor(np.array(state_batch['lin_features'])).to(self.Q_eval.device),
+            'conv_features':    torch.tensor(np.array(state_batch['conv_features'])).to(self.device),
+            'lin_features':     torch.tensor(np.array(state_batch['lin_features'])).to(self.device),
         }
         new_state_batch = {
-            'conv_features': torch.tensor(np.array(new_state_batch['conv_features'])).to(self.Q_eval.device),
-            'lin_features': torch.tensor(np.array(new_state_batch['lin_features'])).to(self.Q_eval.device),
+            'conv_features':    torch.tensor(np.array(new_state_batch['conv_features'])).to(self.device),
+            'lin_features':     torch.tensor(np.array(new_state_batch['lin_features'])).to(self.device),
         }
-        reward_batch = torch.tensor(reward_batch).to(self.Q_eval.device)
-        terminal_batch = torch.tensor(terminal_batch).to(self.Q_eval.device)
+        reward_batch    = torch.tensor(reward_batch).to(self.device)
+        terminal_batch  = torch.tensor(terminal_batch).to(self.device)
 
         # estimate value of original and resulting state
-        q_eval = self.Q_eval.forward(state_batch, True)[batch_index, action_batch]
-        q_next = self.Q_eval.forward(new_state_batch, True)
+        q_eval = self.model.forward(state_batch, True)[batch_index, action_batch]
+        q_next = self.model.forward(new_state_batch, True)
 
         # use actual reward to improve evaluation of original state
         q_next[terminal_batch] = 0.0
-        q_target = reward_batch + self.gamma * torch.max(q_next, dim=1)[0]
+        q_target = reward_batch + self.model.hp['gamma'] * torch.max(q_next, dim=1)[0]
 
         # use gradient descent to adjust model
-        loss = self.Q_eval.loss(q_target, q_eval).to(self.Q_eval.device)
+        loss = self.model.loss(q_target, q_eval).to(self.device)
         loss.backward()
 
         # trigger optimizer step
-        self.Q_eval.optimizer.step()
+        self.model.optimizer.step()
 
         # increment counters
-        self.iteration += 1
+        self.model.iteration += 1
         if end_epoch:
-            self.epoch += 1
+            self.model.epoch += 1
 
             # adjust learning parameters
-            #self.Q_eval.scheduler.step()
-            self.epsilon = self.epsilon - self.eps_dec if self.epsilon > self.eps_min else self.eps_min
+            #self.model.scheduler.step()
+            self.model.epsilon = self.model.epsilon - self.model.hp['epsilon_dec'] if self.model.epsilon > self.model.hp['epsilon_min'] else self.model.hp['epsilon_min']
 
-        self.logger.info("LR = " + str(self.Q_eval.scheduler.get_last_lr()))
+        self.logger.info("LR = " + str(self.model.scheduler.get_last_lr()))
 
         # followed https://www.youtube.com/watch?v=wc-FxNENg9U
-
 
 def state_symmetries(state_batch, new_state_batch, action_batch):
     """
@@ -308,17 +365,27 @@ def state_symmetries(state_batch, new_state_batch, action_batch):
 
     # -> define map onehot encoded directions of linear features here
     lin_onehot_maps = [
-        {Direction.UP:  4,  Direction.DOWN:  5, Direction.LEFT:  7, Direction.RIGHT:  8 },
-        {Direction.UP:  8,  Direction.DOWN:  9, Direction.LEFT: 10, Direction.RIGHT: 11 },
-        {Direction.UP: 12,  Direction.DOWN: 13, Direction.LEFT: 14, Direction.RIGHT: 15 },
-        {Direction.UP: 16,  Direction.DOWN: 17, Direction.LEFT: 18, Direction.RIGHT: 19 },
-        {Direction.UP: 20+Action.UP, Direction.DOWN: 20+Action.DOWN, Direction.LEFT: 20+Action.LEFT, Direction.RIGHT:  20+Action.RIGHT },
-        {Direction.UP: 28,  Direction.DOWN: 29, Direction.LEFT: 30, Direction.RIGHT: 31},
-        {Direction.UP: 32,  Direction.DOWN: 33, Direction.LEFT: 34, Direction.RIGHT: 35},
-        {Direction.UP: 36,  Direction.DOWN: 37, Direction.LEFT: 38, Direction.RIGHT: 39},
-        {Direction.UP: 41+Action.UP, Direction.DOWN: 41+Action.DOWN, Direction.LEFT: 41+Action.LEFT, Direction.RIGHT: 41+Action.RIGHT},
-        {Direction.UP: 47,  Direction.DOWN: 48, Direction.LEFT: 49, Direction.RIGHT: 50},
-        {Direction.UP: 53,  Direction.DOWN: 54, Direction.LEFT: 55, Direction.RIGHT: 56},
+        { Direction.UP:  4, Direction.DOWN:  5, Direction.LEFT:  7, Direction.RIGHT:  8 },
+        { Direction.UP:  8, Direction.DOWN:  9, Direction.LEFT: 10, Direction.RIGHT: 11 },
+        { Direction.UP: 12, Direction.DOWN: 13, Direction.LEFT: 14, Direction.RIGHT: 15 },
+        { Direction.UP: 16, Direction.DOWN: 17, Direction.LEFT: 18, Direction.RIGHT: 19 },
+        { Direction.UP: 28, Direction.DOWN: 29, Direction.LEFT: 30, Direction.RIGHT: 31 },
+        { Direction.UP: 32, Direction.DOWN: 33, Direction.LEFT: 34, Direction.RIGHT: 35 },
+        { Direction.UP: 36, Direction.DOWN: 37, Direction.LEFT: 38, Direction.RIGHT: 39 },
+        { Direction.UP: 47, Direction.DOWN: 48, Direction.LEFT: 49, Direction.RIGHT: 50 },
+        { Direction.UP: 53, Direction.DOWN: 54, Direction.LEFT: 55, Direction.RIGHT: 56 },
+        {
+            Direction.UP:       41 + Action.UP,
+            Direction.DOWN:     41 + Action.DOWN,
+            Direction.LEFT:     41 + Action.LEFT,
+            Direction.RIGHT:    41 + Action.RIGHT,
+        },
+        {
+            Direction.UP:       20 + Action.UP,
+            Direction.DOWN:     20 + Action.DOWN,
+            Direction.LEFT:     20 + Action.LEFT,
+            Direction.RIGHT:    20 + Action.RIGHT
+        },
     ]
 
     # define symmetries
@@ -326,35 +393,49 @@ def state_symmetries(state_batch, new_state_batch, action_batch):
         return x
 
     def R(x, is_conv=False):
-        if is_conv: return np.rot90(x, k=1)
-        else:       return Direction.rot90(x, k=1)
+        if is_conv:
+            return np.rot90(x, k=1)
+        else:
+            return Direction.rot90(x, k=1)
 
     def R2(x, is_conv=False):
-        if is_conv: return np.rot90(x, k=2)
-        else:       return Direction.rot90(x, k=2)
+        if is_conv:
+            return np.rot90(x, k=2)
+        else:
+            return Direction.rot90(x, k=2)
 
     def R3(x, is_conv=False):
-        if is_conv: return np.rot90(x, k=-1)
-        else:       return Direction.rot90(x, k=-1)
+        if is_conv:
+            return np.rot90(x, k=-1)
+        else:
+            return Direction.rot90(x, k=-1)
 
     def S(x, is_conv=False):
-        if is_conv: return np.fliplr(x)
-        else:       return Direction.fliplr(x)
+        if is_conv:
+            return np.fliplr(x)
+        else:
+            return Direction.fliplr(x)
 
     def SR(x, is_conv=False):
-        if is_conv: return np.fliplr(np.rot90(x, k=1))
-        else:       return Direction.fliplr(Direction.rot90(x, k=1))
+        if is_conv:
+            return np.fliplr(np.rot90(x, k=1))
+        else:
+            return Direction.fliplr(Direction.rot90(x, k=1))
 
     def SR2(x, is_conv=False):
-        if is_conv: return np.flipud(x)
-        else:       return Direction.flipud(x)
+        if is_conv:
+            return np.flipud(x)
+        else:
+            return Direction.flipud(x)
 
     def SR3(x, is_conv=False):
-        if is_conv: return np.flipud(np.rot90(x, k=1))
-        else:       return Direction.flipud(Direction.rot90(x, k=1))
+        if is_conv:
+            return np.flipud(np.rot90(x, k=1))
+        else:
+            return Direction.flipud(Direction.rot90(x, k=1))
 
     # pick random symmetry
-    symmetries = [ I, R, R2, R3, S, SR, SR2, SR3 ]
+    symmetries = [I, R, R2, R3, S, SR, SR2, SR3]
     sym = symmetries[np.random.choice(len(symmetries))]
 
     for batch in (state_batch, new_state_batch):
@@ -365,10 +446,10 @@ def state_symmetries(state_batch, new_state_batch, action_batch):
         for onehot_map in conv_onehot_maps:
             for features in batch['conv_features']:
                 feature_buffer = {
-                    Direction.UP:       features[onehot_map[Direction.UP    ]],
-                    Direction.DOWN:     features[onehot_map[Direction.DOWN  ]],
-                    Direction.LEFT:     features[onehot_map[Direction.LEFT  ]],
-                    Direction.RIGHT:    features[onehot_map[Direction.RIGHT ]],
+                    Direction.UP: features[onehot_map[Direction.UP]],
+                    Direction.DOWN: features[onehot_map[Direction.DOWN]],
+                    Direction.LEFT: features[onehot_map[Direction.LEFT]],
+                    Direction.RIGHT: features[onehot_map[Direction.RIGHT]],
                 }
 
                 for direction in (Direction.UP, Direction.DOWN, Direction.LEFT, Direction.RIGHT):
@@ -378,10 +459,10 @@ def state_symmetries(state_batch, new_state_batch, action_batch):
         for onehot_map in lin_onehot_maps:
             for features in batch['lin_features']:
                 feature_buffer = {
-                    Direction.UP:       features[onehot_map[Direction.UP    ]],
-                    Direction.DOWN:     features[onehot_map[Direction.DOWN  ]],
-                    Direction.LEFT:     features[onehot_map[Direction.LEFT  ]],
-                    Direction.RIGHT:    features[onehot_map[Direction.RIGHT ]],
+                    Direction.UP: features[onehot_map[Direction.UP]],
+                    Direction.DOWN: features[onehot_map[Direction.DOWN]],
+                    Direction.LEFT: features[onehot_map[Direction.LEFT]],
+                    Direction.RIGHT: features[onehot_map[Direction.RIGHT]],
                 }
 
                 for direction in (Direction.UP, Direction.DOWN, Direction.LEFT, Direction.RIGHT):
@@ -389,15 +470,14 @@ def state_symmetries(state_batch, new_state_batch, action_batch):
 
     # apply symmetry to action if it is directional
     action_batch = np.array([
-        action  if action == Action.WAIT or action == Action.BOMB
-                else Direction.to_action(sym(Direction.from_action(action)))
+        action if action == Action.WAIT or action == Action.BOMB
+        else Direction.to_action(sym(Direction.from_action(action)))
         for action in action_batch
     ])
 
     return state_batch, new_state_batch, action_batch
 
-
-def state_to_features(game_state: dict) -> np.array:
+def state_to_features(game_state: dict, coordinate_history, action_history) -> np.array:
     """
     Extract useful features from a game state
 
@@ -406,8 +486,10 @@ def state_to_features(game_state: dict) -> np.array:
     The distance_map() function is used to scan the arena and generate maps containing distance and direction information,
     these maps are then used to calculate information rich features
 
-    :param game_state:  A dictionary describing the current game board.
-    :return:            Dictionary with both 'conv_features' and 'lin_features'
+    :param game_state:          A dictionary describing the current game board.
+    :param coordinate_history:  A history of the agents positons
+    :param action_history:      A history of the agents actions
+    :return:                    Dictionary with both 'conv_features' and 'lin_features'
     """
     # This is the dict before the game begins and after it ends
     if game_state is None:
@@ -426,8 +508,6 @@ def state_to_features(game_state: dict) -> np.array:
     explosion_map = game_state['explosion_map']
     danger_threshold = 1
 
-    coordinate_history.append((ax, ay))
-
     # more complex maps containing different information
     distance_map, direction_map = get_distance_map(ax, ay, field, bombs, enemies)
     crate_map   = get_generic_map(crates, field)
@@ -443,7 +523,7 @@ def state_to_features(game_state: dict) -> np.array:
     lin_features.append(bomb_available)                                                                     # 0
     lin_features.append(number_of_crates_reachable(ax, ay, field))                                          # 1
     lin_features.append(danger_map[ax, ay] > danger_threshold)                                              # 2
-    lin_features.append(is_repeating_actions())                                                             # 3
+    lin_features.append(is_repeating_actions(action_history))                                               # 3
     lin_features.extend(nearest_coins_feature(coins, distance_map, direction_map))                          # 4-7
     lin_features.extend(nearest_crates_feature(crates, distance_map, direction_map))                        # 8-11
     lin_features.extend(get_free_distances(ax, ay, field))                                                  # 12-15
@@ -453,10 +533,11 @@ def state_to_features(game_state: dict) -> np.array:
     lin_features.append(float(game_state['round'] * len(enemies)) / 400)                                    # 27
     lin_features.extend(enemy_directions_feature(distance_map, direction_map, enemies))                     # 28-39
     lin_features.append(is_at_crossing(ax, ay))                                                             # 40
-    lin_features.extend(get_last_actions(k=1))                                                              # 41-46
+    lin_features.extend(get_last_actions(action_history, k=1))                                              # 41-46
     lin_features.extend(get_direction_to_trapped_enemy(ax, ay, dead_end_list, distance_map, direction_map)) # 47-51
     lin_features.append(is_next_to_enemy(ax, ay, enemies))                                                  # 52
     lin_features.extend(do_not_enter_dead_end(ax, ay, dead_end_map, dead_end_list, enemies, distance_map))  # 53-56
+    is_repeating_positions(coordinate_history)                                                              # 57
 
     conv_features.extend(onehot_encode_direction_map(direction_map))                                        # 0-3
     conv_features.append(distance_map)                                                                      # 4
@@ -469,9 +550,6 @@ def state_to_features(game_state: dict) -> np.array:
     conv_features = [focus_map(ax, ay, full_map, r=-1) for full_map in conv_features]
 
     return { 'conv_features': conv_features, 'lin_features': lin_features }
-
-last_actions_deque = deque(maxlen=100)
-coordinate_history = deque([], maxlen=20)
 
 def get_distance_map(ax, ay, field, bombs=None, enemies=None):
     """
@@ -738,12 +816,12 @@ def enemy_directions_feature(distance_map, direction_map, enemies, k=3):
 
     return features
 
-def get_last_actions(k=1):
+def get_last_actions(action_history, k=1):
     """
     returns the last k actions as a one-hot
     """
     one_hot = [0] * 6 * k
-    for i, action in enumerate(reversed(last_actions_deque)):
+    for i, action in enumerate(reversed(action_history)):
         if i >= k:
             break
 
@@ -751,17 +829,17 @@ def get_last_actions(k=1):
 
     return one_hot
 
-def is_repeating_actions(k=4):
+def is_repeating_actions(action_history, k=4):
     """
     returns True when the agent is repeating actions such that it is stuck in one location,
     e.g. 4 times wait, left-right-left-right, up-down-up-down
     """
     # If fewer than k actions have been taken, it cannot be stuck
-    if len(last_actions_deque) < k:
+    if len(action_history) < k:
         return 0
 
     # Convert actions to a list for easier processing
-    actions = list(last_actions_deque)[-k:]
+    actions = list(action_history)[-k:]
 
     # Check if all actions are WAIT
     if actions.count(Action.WAIT) == k:
@@ -773,7 +851,7 @@ def is_repeating_actions(k=4):
 
     return False
 
-def is_repeating_positions(min_unique_positions=5):
+def is_repeating_positions(coordinate_history, min_unique_positions=5):
     """
     Determines if the agent is likely stuck based on its movement history.
     :return: True if the agent is likely stuck, False otherwise.
@@ -1036,20 +1114,3 @@ def is_next_to_enemy(ax, ay, enemies, d=1):
 #  - check whether all rewards always work as they are supposed to and do not somehow cause the agent to learn
 #    unwanted stuff such as the oscillation behavior
 #  - Why exactly does performance decrease after some amount of training steps? Why the periodic ups and downs?
-
-
-# changes:
-# - Directions, Actions, Distance to utils classes
-# - Usage of maps
-# - get_generic_map
-# - danger_map improved
-# - is_stuck -> is_repeating_actions
-# - is_stuck2 -> is_repeating_positions
-# - neighbouring -> focus_map
-# - relative_bomb_positions removed
-# - nearest_coins_feature, nearest_crate_feature improved
-# - last_action -> last_actions(k)
-# - direction_to_safety improved
-# - disallowed_actions improved
-# - enemies_distances_and_directions -> enemy_directions_feature
-# - modified direction_to_enemy_in_dead_end a bit
