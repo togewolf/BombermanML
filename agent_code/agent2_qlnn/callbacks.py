@@ -1,6 +1,3 @@
-import os
-import pickle
-from collections import deque
 from .dqlnn_model import Agent, state_to_features
 from .utils import Action
 
@@ -20,20 +17,7 @@ def setup(self):
     :param self: This object is passed to all callbacks, and you can set arbitrary values.
     """
 
-    # load specific snapshot of model; if set to zero, the default (model/model.pt) will be loaded
-    # note that training from a snapshot n will save new snapshots as n+10, n+20 etc., thus overriding some of the previous snapshots
-    self.start_from_snapshot = 0
-
-    model_filename = 'model/model.pt' if self.start_from_snapshot == 0 else 'model/snapshots/model-' + str(self.start_from_snapshot) + '.pt'
-
-    if not os.path.isfile(model_filename):
-        self.logger.info("Setting up model from scratch.")
-        self.model = Agent(self.logger)
-
-    else:
-        self.logger.info("Loading model from saved state.")
-        with open(model_filename, 'rb') as file:
-            self.model = pickle.load(file)
+    self.agent = Agent(self.logger, 'model', 100)
 
 
 def act(self, game_state: dict) -> str:
@@ -45,6 +29,7 @@ def act(self, game_state: dict) -> str:
     :param game_state: The dictionary that describes everything on the board.
     :return: The action to take as a string.
     """
-    action = self.model.choose_action(state_to_features(game_state), self.train)
+    action = self.agent.choose_action(game_state, state_to_features(game_state, *self.agent.get_history()), self.train)
+
     self.logger.info("Action: " + Action.to_str(action))
     return Action.to_str(action)
