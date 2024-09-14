@@ -732,7 +732,7 @@ def path_can_be_blocked_by_enemy(dist, safe_pos, others, field, max_steps=4):
 
     agent_distance = dist[sx, sy]
 
-    if agent_distance > 5:
+    if agent_distance > 4:
         return False  # If the agent can't reach the safe tile, don't consider it blockable
 
     # BFS setup for enemies
@@ -756,9 +756,7 @@ def path_can_be_blocked_by_enemy(dist, safe_pos, others, field, max_steps=4):
             # Explore neighboring tiles
             for dx, dy in directions:
                 nx, ny = x + dx, y + dy
-                if (0 <= nx < len(field) and 0 <= ny < len(field[0])  # Check bounds
-                        and field[nx, ny] == 0  # Tile is passable (not a wall)
-                        and (nx, ny) not in enemy_visited):  # Not visited yet
+                if field[nx, ny] == 0 and (nx, ny) not in enemy_visited:  # Not visited yet
                     enemy_visited.add((nx, ny))
                     enemy_queue.append((nx, ny, steps + 1))
 
@@ -775,7 +773,7 @@ def nearest_safe_tile(ax, ay, danger_map, others, bombs, dist, grad, in_danger, 
 
     directions = [dRIGHT, dDOWN, dLEFT, dUP]
     distances = [15, 15, 15, 15]  # Default to 15 if no safe tile is found in a direction
-    radius = 5  # Limit the search to a radius of 5 tiles around the agent for efficiency
+    radius = 4  # Limit the search to a radius of 5 tiles around the agent for efficiency
 
     # Define the search boundaries to ensure they are within the field limits
     x_min = max(1, ax - radius)
@@ -783,19 +781,39 @@ def nearest_safe_tile(ax, ay, danger_map, others, bombs, dist, grad, in_danger, 
     y_min = max(1, ay - radius)
     y_max = min(16, ay + radius + 1)
 
-    # Check for the nearest safe tile in each direction
+
+
+    def is_safe_tile(x, y, allow_blocked_by_enemy=False):
+        """Check if the tile is safe based on the danger map and other conditions."""
+        if dist[x, y] != INF and (x, y) not in others and (x, y) not in bombs:
+            if allow_blocked_by_enemy and (danger_map[x, y] == 0 or danger_map[x, y] < danger_map[ax, ay]):
+                return True
+            # Otherwise, ensure the path is not blocked by enemies or in an explosion
+            return not path_can_be_blocked_by_enemy(dist, (x, y), others, field) and danger_map[x, y] == 0
+        return False
+
+    # First pass: check for tiles that cannot be blocked by enemies
     for direction in directions:
         for x in range(x_min, x_max):
             for y in range(y_min, y_max):
-                if danger_map[x, y] == 0 and dist[x, y] != INF and (x, y) not in others and (x, y) not in bombs \
-                        and not path_can_be_blocked_by_enemy(dist, (x, y), others, field):
-                    # Calculate the direction to this safe tile
+                if is_safe_tile(x, y, allow_blocked_by_enemy=False):
                     dir_to_tile = direction_to_object((x, y), grad)
                     if dir_to_tile == direction:
                         distance = dist[x, y]
-                        # Update the distance only if it's closer than the current one
                         direction_index = directions.index(direction)
                         distances[direction_index] = min(distances[direction_index], distance)
+
+    # If all safe tiles are too far, perform a second pass allowing tiles blocked by enemies and lower danger level tiles
+    if all(d > 5 - danger_map[ax, ay] for d in distances):
+        for direction in directions:
+            for x in range(x_min, x_max):
+                for y in range(y_min, y_max):
+                    if is_safe_tile(x, y, allow_blocked_by_enemy=True):
+                        dir_to_tile = direction_to_object((x, y), grad)
+                        if dir_to_tile == direction:
+                            distance = dist[x, y]
+                            direction_index = directions.index(direction)
+                            distances[direction_index] = min(distances[direction_index], distance)
 
     return distances
 
@@ -815,15 +833,15 @@ def disallowed_actions(game_state, explosion_map, others, bombs, dist_t, grad_t,
 
     directions = [(ax + 1, ay), (ax, ay + 1), (ax - 1, ay), (ax, ay - 1)]  # Right, Down, Left, Up
 
-    # do not walk into explosion that is more progressed than the one on the current tile, or a wall
+    # do not walk into explosion that is more progressed than the one on the current tile, or a wall, or a bomb
     for i, (dx, dy) in enumerate(directions):
-        if field[dx, dy] != 0 or explosion_map[dx, dy] == 4:
+        if field[dx, dy] != 0 or explosion_map[dx, dy] == 4 or (dx, dy) in bombs:
             # this still allows stepping in bomb radius if it can escape in the next step
             disallowed[i] = 1
 
     # logger.info("min(nearest_safe) = " + str(min(nearest_safe_t)))
 
-    if explosion_map[ax, ay] > 0:  # is in imminent explosion zone, bombs cannot be empty if this is the case
+    if current_danger > 0:  # is in imminent explosion zone, bombs cannot be empty if this is the case
         logger.info("Nearest_safe: " + str(nearest_safe_t))
         for i, safe_dist in enumerate(nearest_safe_t):
             if safe_dist > 5 - current_danger:
@@ -831,6 +849,9 @@ def disallowed_actions(game_state, explosion_map, others, bombs, dist_t, grad_t,
         if min(nearest_safe_t) == 5 - current_danger:
             disallowed[4] = 1
             disallowed[5] = 1  # do not wait or bomb, escape
+
+
+    logger.info("Disallowed1: " + str(disallowed))
 
     if (ax, ay) in bombs:  # is standing on a bomb, bombs cannot be empty if this is the case
         for i, safe_dist in enumerate(nearest_safe_t):
@@ -886,7 +907,10 @@ def disallowed_actions(game_state, explosion_map, others, bombs, dist_t, grad_t,
         disallowed[0:4] = [1] * 4  # if it has no bomb, at least block the enemy in the dead end
 
     if all(disallowed):
-        disallowed = [0] * 6  # wait
+        disallowed = [0] * 6
+        for i, d in enumerate(directions):
+            if explosion_map[d] == 4 or field[d] != 0 or d in bombs:
+                disallowed[i] == 1
 
     if is_repeating_positions() and disallowed[5] == 0:
         disallowed[0:5] = [1] * 5  # forces agent to drop a bomb to become unstuck
@@ -1164,6 +1188,10 @@ def do_not_get_surrounded(others, ax, ay, radius=5):
 
 # todo:
 """
+- count coins and do not suggest to go to crate if no coin left
+- pass more of the surrounding tiles to the agent for better decision making
+
+
 Immortality:
 ?
 
@@ -1171,6 +1199,7 @@ Immortality:
 How to make the agent better aside from that:
 
 Things our features are just not good enough for, yet:
+- do not block an enemy from escaping the bomb of another enemy so that the kill goes to the other enemy
 - prioritizing coins (prefer to collect those that would be collected by an enemy if the agent collected another first)
 - getting kills in complex multi-agent situations (make agent locations and directions better by not making each a
     one-hot, instead there should always be 2 non zero-values, the relative coordinates.)

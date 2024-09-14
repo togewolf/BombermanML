@@ -94,10 +94,12 @@ def game_events_occurred(self, old_game_state: dict, self_action: str, new_game_
             if old_game_state['field'][pos] == 1:
                 crate_adjacent = True
                 break
-        if crate_adjacent:
-            events.append(DROPPED_BOMB_NEXT_TO_CRATE)  # we only want this event one time
+        #if crate_adjacent:
+            #events.append(DROPPED_BOMB_NEXT_TO_CRATE)  # we only want this event one time
 
         if crate_count > 0:
+            events.append(DROPPED_BOMB_NEXT_TO_CRATE)
+            # test, this way the agent does not have to drop it directly next to the crate, which often is advantageous
             for i in range(crate_count):
                 events.append(DROPPED_BOMB_THAT_CAN_DESTROY_CRATE)
 
