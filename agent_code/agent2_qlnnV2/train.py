@@ -18,6 +18,7 @@ DROPPED_BOMB_WHILE_ENEMY_NEAR = 'DROPPED_BOMB_WHILE_ENEMY_NEAR'
 DROPPED_BOMB_NOT_AT_CROSSING = 'DROPPED_BOMB_NOT_AT_CROSSING'  # see is_at_crossing function for the idea behind this
 DID_OPPOSITE_OF_LAST_ACTION = 'DID_OPPOSITE_OF_LAST_ACTION'  # idea: prevent oscillating back and forth
 FOLLOWED_DIRECTION_SUGGESTION = 'FOLLOWED_DIRECTION_SUGGESTION'  # see direction_to_enemy_in_dead_end
+DID_NOT_FOLLOW_DIRECTION_SUGGESTION = 'DID_NOT_FOLLOW_DIRECTION_SUGGESTION'
 DROPPED_BOMB_ON_TRAPPED_ENEMY = 'DROPPED_BOMB_ON_TRAPPED_ENEMY'  # enemy dies for sure, so high reward
 DROPPED_BOMB_NEXT_TO_ENEMY = 'DROPPED_BOMB_NEXT_TO_ENEMY'
 
@@ -30,7 +31,7 @@ def setup_training(self):
 
     :param self: This object is passed to all callbacks and you can set arbitrary values.
     """
-    self.save_frequency = 100  # store a snapshot every n rounds
+    self.save_frequency = 25  # store a snapshot every n rounds
 
 
 previous_action = 'WAIT'
@@ -117,15 +118,14 @@ def game_events_occurred(self, old_game_state: dict, self_action: str, new_game_
         if old_features[34] == 1:
             events.append(DROPPED_BOMB_NEXT_TO_ENEMY)
 
-    else:
-        if old_features[33] == 1:
-            self.logger.info("Did not drop bomb on trapped enemy")
+    # self.logger.info("Should drop bomb on trapped enemy feature " + str(old_features[33]))
 
     if new_features[3] == 1:
         events.append(IS_REPEATING_ACTIONS)
 
     if followed_direction(old_features[4:8], self_action):
         events.append(FOLLOWED_DIRECTION_SUGGESTION)
+    else: events.append(DID_NOT_FOLLOW_DIRECTION_SUGGESTION)
     self.logger.info("Direction suggestion: " + str(new_features[4:8]))
 
     global previous_action
@@ -137,7 +137,7 @@ def game_events_occurred(self, old_game_state: dict, self_action: str, new_game_
     # self.logger.info("Current action: " + self_action)
     previous_action = self_action
 
-    self.logger.info("Disallowed actions: " + str(new_features[20:26]))
+    self.logger.info("Disallowed actions: " + str(new_features[8:14]))
 
     reward = reward_from_events(self, events)
     self.cumulative_reward += reward
@@ -175,8 +175,7 @@ def end_of_round(self, last_game_state: dict, last_action: str, events: List[str
         # Gather metrics for the round
     score = last_game_state['self'][1]
     survived = 1 if e.SURVIVED_ROUND in events else 0
-    if e.KILLED_SELF in events:
-        self.suicides += 1
+    suicide = 1 if e.KILLED_SELF in events else 0
 
     csv_file_path = 'model/training_metrics.csv'
     file_exists = os.path.isfile(csv_file_path)
@@ -186,12 +185,11 @@ def end_of_round(self, last_game_state: dict, last_action: str, events: List[str
         writer = csv.writer(file)
         if not file_exists:
             writer.writerow(['Epoch', 'Score', 'Survived', 'CumulativeReward', 'Kills', 'Suicides', 'OpponentsEliminated'])
-        writer.writerow([self.model.epoch, score, survived, self.cumulative_reward, self.kills, self.suicides, self.opponents_eliminated])
+        writer.writerow([self.model.epoch, score, survived, self.cumulative_reward, self.kills, suicide, self.opponents_eliminated])
 
     # Reset tracking variables for the next round
     self.cumulative_reward = 0
     self.kills = 0
-    self.suicides = 0
     self.opponents_eliminated = 0
 
     with open('model/scores.csv', mode='a', newline='') as file:
@@ -212,28 +210,28 @@ def reward_from_events(self, events: List[str]) -> int:
     Here you can modify the rewards your agent get to en/discourage certain behavior.
     """
     game_rewards = {
-        e.MOVED_UP: -0.2,
-        e.MOVED_DOWN: -0.2,
-        e.MOVED_LEFT: -0.2,
-        e.MOVED_RIGHT: -0.2,
-        e.WAITED: -0.5,
+        e.MOVED_UP: -0.1,
+        e.MOVED_DOWN: -0.1,
+        e.MOVED_LEFT: -0.1,
+        e.MOVED_RIGHT: -0.1,
+        e.WAITED: -0.3,
         e.COIN_COLLECTED: 5,
         e.KILLED_OPPONENT: 5,
-        e.KILLED_SELF: -5,
-        e.GOT_KILLED: -5,
+        # e.KILLED_SELF: -5,  # better to kill oneself than if the enemy gets the kill
+        e.GOT_KILLED: -10,
         e.INVALID_ACTION: -1,
-        e.OPPONENT_ELIMINATED: 2.5,
+        e.OPPONENT_ELIMINATED: 3,
         e.BOMB_DROPPED: -0.5,
-        e.SURVIVED_ROUND: 5,
-        DROPPED_BOMB_THAT_CAN_DESTROY_CRATE: 0.4,  # reward per crate that the bomb can reach
+        e.SURVIVED_ROUND: 10,
+        DROPPED_BOMB_THAT_CAN_DESTROY_CRATE: 0.75,  # reward per crate that the bomb can reach
         DROPPED_BOMB_WHILE_ENEMY_NEAR: 2,
         IS_REPEATING_ACTIONS: -0.5,
-        DROPPED_BOMB_NEXT_TO_CRATE: 1,
-        DROPPED_BOMB_NOT_AT_CROSSING: -0.5,
-        DID_OPPOSITE_OF_LAST_ACTION: -0.3,
-        FOLLOWED_DIRECTION_SUGGESTION: 0.5,
-        DROPPED_BOMB_ON_TRAPPED_ENEMY: 9,  # enemy dies (almost) for sure
-        DROPPED_BOMB_NEXT_TO_ENEMY: 3,
+        DROPPED_BOMB_NEXT_TO_CRATE: 2,
+        DROPPED_BOMB_NOT_AT_CROSSING: -1,
+        DID_OPPOSITE_OF_LAST_ACTION: -0.2,
+        FOLLOWED_DIRECTION_SUGGESTION: 0.4,  # too high value causes oscillation
+        # DID_NOT_FOLLOW_DIRECTION_SUGGESTION: -0.2,  # hopefully prevents oscillation (does not)
+        DROPPED_BOMB_NEXT_TO_ENEMY: 2,
     }
     reward_sum = sum(game_rewards[event] for event in events if event in game_rewards)
     self.logger.info(f"Awarded {reward_sum} for events {', '.join(events)}")
