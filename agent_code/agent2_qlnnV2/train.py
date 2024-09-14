@@ -21,6 +21,7 @@ FOLLOWED_DIRECTION_SUGGESTION = 'FOLLOWED_DIRECTION_SUGGESTION'  # see direction
 DID_NOT_FOLLOW_DIRECTION_SUGGESTION = 'DID_NOT_FOLLOW_DIRECTION_SUGGESTION'
 DROPPED_BOMB_ON_TRAPPED_ENEMY = 'DROPPED_BOMB_ON_TRAPPED_ENEMY'  # enemy dies for sure, so high reward
 DROPPED_BOMB_NEXT_TO_ENEMY = 'DROPPED_BOMB_NEXT_TO_ENEMY'
+WAITED_ON_A_BOMB = 'WAITED_ON_A_BOMB'
 
 
 def setup_training(self):
@@ -120,6 +121,9 @@ def game_events_occurred(self, old_game_state: dict, self_action: str, new_game_
         if old_features[34] == 1:
             events.append(DROPPED_BOMB_NEXT_TO_ENEMY)
 
+        if self_action == 'WAIT':
+            events.append(WAITED_ON_A_BOMB)
+
     # self.logger.info("Should drop bomb on trapped enemy feature " + str(old_features[33]))
 
     if new_features[3] == 1:
@@ -218,7 +222,7 @@ def reward_from_events(self, events: List[str]) -> int:
         e.MOVED_RIGHT: -0.1,
         e.WAITED: -0.3,
         e.COIN_COLLECTED: 5,
-        e.KILLED_OPPONENT: 5,
+        e.KILLED_OPPONENT: 7,
         # e.KILLED_SELF: -5,  # better to kill oneself than if the enemy gets the kill
         e.GOT_KILLED: -10,
         e.INVALID_ACTION: -1,
@@ -234,6 +238,8 @@ def reward_from_events(self, events: List[str]) -> int:
         FOLLOWED_DIRECTION_SUGGESTION: 0.4,  # too high value causes oscillation
         # DID_NOT_FOLLOW_DIRECTION_SUGGESTION: -0.2,  # hopefully prevents oscillation (does not)
         DROPPED_BOMB_NEXT_TO_ENEMY: 2,
+        WAITED_ON_A_BOMB: -1  # sometimes it is okay or necessary to do that, but usually it is best to avoid.
+
     }
     reward_sum = sum(game_rewards[event] for event in events if event in game_rewards)
     self.logger.info(f"Awarded {reward_sum} for events {', '.join(events)}")
