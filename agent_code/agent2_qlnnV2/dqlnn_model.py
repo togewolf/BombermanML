@@ -8,10 +8,11 @@ from collections import deque
 import random
 from heapq import heapify, heappop, heappush
 
+from .utils import Action
+
 
 class DeepQNetwork(nn.Module):
     def __init__(self, lr, input_dims, l1_dims, l2_dims, l3_dims, l4_dims, l5_dims, dropout_rate=0.1):
-        # seems to work better without dropout
         super(DeepQNetwork, self).__init__()
         # torch.autograd.set_detect_anomaly(True)  # remove when it works
         self.input_dims = input_dims
@@ -63,7 +64,7 @@ class DeepQNetwork(nn.Module):
         if train:
             x = self.dropout5(x)
         actions = self.lo(x)
-        # actions_prob = torch.sigmoid_(actions)
+        # actions_prob = torch.sigmoid_(actions)  # todo
         # softmax/sigmoid causes really weird errors here
         return actions
 
@@ -80,8 +81,16 @@ class Agent:
         self.mem_size = max_mem_size
         self.batch_size = batch_size
 
+        # feature-related
+        self.total_coins = 0
+        self.previous_scores = {}
+        self.bomb_owners = {}
+        self.last_actions_deque = deque(maxlen=4)
+        self.coordinate_history = deque([], maxlen=20)
+
+        # network dimensions
         self.Q_eval = DeepQNetwork(self.lr, input_dims=input_dims, l1_dims=2 ** 9, l2_dims=2 ** 9,
-                                   l3_dims=2 ** 8, l4_dims=2 ** 7, l5_dims=2 ** 7)  # experiment here
+                                   l3_dims=2 ** 8, l4_dims=2 ** 7, l5_dims=2 ** 7)
 
         self.state_memory = np.zeros((self.mem_size, input_dims), dtype=np.float32)
         self.new_state_memory = np.zeros((self.mem_size, input_dims), dtype=np.float32)
@@ -106,27 +115,27 @@ class Agent:
         self.mem_cntr += 1
 
     def choose_action(self, game_state, train):
-        features = state_to_features(game_state, self.logger)
-        blocked = features[8:14]  # [0,0,0,0,0,0]
+        features = state_to_features(self, game_state, self.logger)
+        disallowed = features[8:14]  # Result of function of immorality
 
         if np.random.random() > self.epsilon or not train:
             state = torch.tensor([features], dtype=torch.float32).to(self.Q_eval.device)
             actions = self.Q_eval.forward(state, train).squeeze()
 
             for i in range(6):
-                if blocked[i] == 1:
+                if disallowed[i] == 1:
                     actions[i] = -9999
 
             action = torch.argmax(actions).item()
 
-            # action_probabilities = actions.clone().detach().softmax(dim=1).squeeze()
+            # action_probabilities = actions.clone().detach().softmax(dim=1).squeeze()  # todo
             # action = int(torch.multinomial(action_probabilities, 1).item())
 
         else:
             p = [.20, .20, .20, .20, .10, .10]
 
             for i in range(6):
-                if blocked[i] == 1:
+                if disallowed[i] == 1:
                     p[i] = 0
 
             total_prob = np.sum(p)
@@ -134,14 +143,13 @@ class Agent:
                 p /= total_prob
             else:
                 p = [.20, .20, .20, .20, .10, .10]
-                self.logger.info("All actions disallowed!")
 
             action = random.choices(range(6), weights=p, k=1)[0]
 
         # self.logger.info("Eps = " + str(self.epsilon) + ")")
-        last_actions_deque.append(action)
+        self.last_actions_deque.append(action)
         _, _, _, (ax, ay) = game_state['self']
-        coordinate_history.append((ax, ay))
+        self.coordinate_history.append((ax, ay))
         return action
 
     def learn(self, end_epoch=False):
@@ -193,129 +201,129 @@ dDOWN = 2
 INF = 999  # 999 represents infinity
 
 
-def state_to_features(game_state: dict, logger) -> np.array:
+def state_to_features(self, game_state: dict, logger) -> np.array:
     """
-    Converts the game state to the input of your model, i.e.
-    a feature vector.
-
-    You can find out about the state of the game environment via game_state,
-    which is a dictionary. Consult 'get_state_for_agent' in environment.py to see
-    what it contains.
-
-    :param logger: imported the logger here to log logs
-    :param game_state:  A dictionary describing the current game board.
-    :return: np.array
+    Converts the game state to a feature vector.
     """
     # This is the dict before the game begins and after it ends
     if game_state is None:
         return None
 
     if game_state['step'] == 1:
-        global total_coins
-        total_coins = 0
+        self.total_coins = 0
+        self.bomb_owners = {}
+        self.last_actions_deque.clear()
+        self.coordinate_history.clear()
 
     features = []
 
     # useful stuff for feature calculating functions, to avoid inefficient recalculations
     _, self_score, bomb_available, (ax, ay) = game_state['self']
+
     field = game_state['field']
+
     coins = game_state['coins']  # [(x, y)]
+
     crates = np.argwhere(field == 1)
     crates = [tuple(pos) for pos in crates]  # so they are in the same format as the coins
+
     bombs = game_state['bombs']  # [(x, y), countdown]
     bombs = [b[0] for b in bombs]
+
     others_full = game_state['others']
     others = [t[3] for t in others_full]
-    dist, grad, crate_map = distance_map(ax, ay, field)
-    danger_zone = danger_map(game_state)
-    in_danger = False
-    if danger_zone[ax, ay] > 0:
-        in_danger = True
-    # nearest_safe = nearest_safe_tile(ax, ay, danger_zone, others, bombs, dist, grad, in_danger)
-    dend_map, dend_list = dead_end_map(field, others, bombs)
 
-    dist_t, grad_t, _ = distance_map_with_temporaries(ax, ay, field, others, bombs)
-    nearest_safe_t = nearest_safe_tile(ax, ay, danger_zone, others, bombs, dist_t, grad_t, True, field)
+    dist, grad, crate_map = get_distance_map(ax, ay, field)
+
+    danger_map = get_danger_map(game_state)
+    in_danger = 0
+    if danger_map[ax, ay] > 0:
+        in_danger = 1
+
+    dead_end_map, dead_end_list = get_dead_end_map(field, others_full, bombs)
+
+    dist_t, grad_t, _ = get_distance_map_with_temporaries(ax, ay, field, others, bombs)
+
+    nearest_safe_t = get_nearest_safe_tile(ax, ay, danger_map, others, bombs, dist_t, grad_t, True, field, False, logger)
     # the t marker means that temporary objects such as bombs and agents are also considered here
 
-    dteide = direction_to_enemy_in_dead_end(ax, ay, dend_list, dist, grad, dend_map)
+    direction_to_enemy_in_dead_end = get_direction_to_enemy_in_dead_end(self, ax, ay, dead_end_list, dist, grad,
+                                                                        dead_end_map, logger)
 
-    blocked = disallowed_actions(game_state, danger_zone, others, bombs, dist_t, grad_t, dist, grad, nearest_safe_t,
-                                 dend_map, dend_list, dteide[4], logger)
+    blocked = function_of_immortality(self, game_state, danger_map, others, bombs, dist_t, grad_t, dist, grad,
+                                      nearest_safe_t, dead_end_map, dead_end_list, direction_to_enemy_in_dead_end[4],
+                                      logger)
 
-    edad = enemies_distances_and_directions(dist, others, grad)
+    enemies_distances_and_directions = get_enemies_distances_and_directions(dist, others, grad)
 
-    collected_coins_all = coins_collected(others_full, self_score)
+    collected_coins_all = coins_collected(self, others_full, self_score)
 
-    suggestion = direction_suggestion(field, coins, crates, others, dist_t, grad_t, dist, grad, dteide,
-                                      collected_coins_all, logger)
+    bomb_owners = track_bombs(self, bombs, others_full, danger_map)
+
+    suggestion = direction_suggestion(field, coins, crates, others, dist_t, grad_t, dist, grad,
+                                      direction_to_enemy_in_dead_end, collected_coins_all, logger)
 
     # logger.info("In danger: " + str(in_danger))
-    # logger.info(danger_zone)
+    # logger.info(danger_map)
     # logger.info("Distances to nearest safe tiles: " + str(nearest_safe))
     # logger.info("Distance map: ")
     # logger.info(dist)
-    # logger.info("Enemies distances: " +str(enemies_distances_and_directions(dist, others, grad)))
+    # logger.info("Enemies distances: " +str(get_enemies_distances_and_directions(dist, others, grad)))
     # logger.info("is at crossing: " + str(is_at_crossing(ax, ay)))
     # logger.info(field)
-    # logger.info(dend_map)
+    # logger.info(dead_end_map)
     # logger.info(nearest_safe)
-    logger.info("Coins collected so far: " +  str(collected_coins_all))
+    logger.info("Direction suggestion: " + str(suggestion))
+    # logger.info("bomb-owners: " + str(bomb_owners))
+    # logger.info("Coins collected so far: " + str(collected_coins_all))
+    logger.info("Last action" + str(last_action(self)))
+    logger.info("Coordinate history" + str(self.coordinate_history))
 
     # features
     features.append(int(bomb_available))  # feat 0
     features.append(crates_reachable(ax, ay, field))  # feat 1
     features.append(in_danger)  # feat 2
-    features.append(is_repeating_actions())  # feat 3
+    features.append(is_repeating_actions(self))  # feat 3
     features.extend(suggestion)  # feat 4-7
     features.extend(blocked)  # 8-13
-    features.extend(edad)  # 14-25
+    features.extend(enemies_distances_and_directions)  # 14-25
     features.append(is_at_crossing(ax, ay))  # 26
-    features.extend(last_action())  # 27-32
-    features.append(dteide[4])  # 33 whether it can bomb trap the enemy
+    features.extend(last_action(self))  # 27-32
+    features.append(direction_to_enemy_in_dead_end[4])  # 33 whether it can bomb trap the enemy
     features.append(int(is_next_to_enemy(ax, ay, others)))  # 34
-    features.extend(neighboring_explosions_or_coins(ax, ay, danger_zone, coins))  # 35-39
-    # features.extend(np.sqrt(nearest coins)  # this might be a good idea
-    # features.extend(np.sqrt(nearest_safe_t))
+    features.extend(neighboring_explosions_or_coins(ax, ay, danger_map, coins))  # 35-39
+    features.extend(nearest_coin_dist(dist, coins, grad))  # 40-43
+    # features.extend(neighboring_crate_count(ax, ay, field))  # 44-47
     # features.extend(do_not_get_surrounded(others, ax, ay, radius=5))
 
     return features
 
 
-previous_scores = {}  # Track the previous score for each agent
-total_coins = 0
-
-
-def coins_collected(others, self_score):  # others is the full version [(str, int-score, bool, (int,int))]
+def coins_collected(self, others, self_score):  # others is the full version [(str, int-score, bool, (int,int))]
     """
     Calculate the total number of coins collected by all agents.
-    :param others: List of opponent agents in the format (name, score, alive, (x, y)).
+    :param others: List of opponent agents in the format (name, score, bomb, (x, y)).
     :param self_score: Current score of the agent.
     :return: Total number of coins collected by all agents so far.
     """
-    global total_coins
-
     # Create a list to include our agent along with the others
     all_agents = others + [("self", self_score, True, (0, 0))]  # Include our agent as "self"
 
     for agent_name, current_score, _, _ in all_agents:
-        if agent_name in previous_scores:
-            previous_score = previous_scores[agent_name]
-
-            # Calculate the score difference
-            score_diff = current_score - previous_score
+        if agent_name in self.previous_scores:
+            score_diff = current_score - self.previous_scores[agent_name]
 
             if score_diff == 1:
                 # Agent collected a coin
-                total_coins += 1
+                self.total_coins += 1
             elif score_diff > 1:
                 # If the score increased by more than 1, add score_diff % 5 to exclude kills
                 # An agent can kill multiple other agents in the same step and collect a coin
-                total_coins += score_diff % 5
+                self.total_coins += score_diff % 5
 
-        previous_scores[agent_name] = current_score
+        self.previous_scores[agent_name] = current_score
 
-    return total_coins
+    return self.total_coins
 
 
 def direction_suggestion(field, coins, crates, others, dist_t, grad_t, dist, grad, dteide, collected_coins_all, logger):
@@ -357,8 +365,6 @@ def direction_suggestion(field, coins, crates, others, dist_t, grad_t, dist, gra
         logger.info("Current goal: crate")
         return k_nearest_crates_feature(field, dist_t, crates, grad_t)
 
-    # todo: if suggestion is still 0 here, this means our agent is the only thing left on the map. Do a victory dance.
-
     return suggestion
 
 
@@ -381,6 +387,30 @@ def k_nearest_objects_feature(dist, objects, grad, k=1):
             int(direction == dUP),
         ]
         features.extend(direction_one_hot)
+    return features
+
+
+def nearest_coin_dist(dist, coins, grad):
+    """
+    :returns the direction to the nearest object(s) as one-hot
+    """
+
+    if not len(coins):  # do not waste time when there are no objects
+        return [0, 0, 0, 0]
+
+    nearest = nearest_objects(dist, coins, 1)[0]
+    features = []
+
+    direction = direction_to_object(nearest, grad)
+    distance = np.sqrt(dist[nearest])
+
+    direction_one_hot = [
+        int(direction == dRIGHT) * distance,
+        int(direction == dDOWN) * distance,
+        int(direction == dLEFT) * distance,
+        int(direction == dUP) * distance,
+    ]
+    features.extend(direction_one_hot)
     return features
 
 
@@ -415,39 +445,7 @@ def k_nearest_crates_feature(field, dist, crates, grad, k=1):
     return features
 
 
-def nearest_crate_feature(field, dist, crates, grad, k=1):
-    """
-    :returns the direction to the nearest location next to a crate as one-hot.
-    Useful for finding crates when there are few left.
-    """
-    if not len(crates):
-        return [0, 0, 0, 0]
-
-    # convert crates into empty locations next to crates
-    locations = set()  # so that the same location is not added twice
-    for cx, cy in crates:
-        for dx, dy in [(-1, 0), (1, 0), (0, -1), (0, 1)]:
-            if field[cx + dx, cy + dy] == 0:
-                locations.add((cx + dx, cy + dy))
-    locations = list(locations)
-
-    nearest_crates = nearest_objects(dist, locations, k)
-    features = []
-    for crate in nearest_crates:
-        direction = direction_to_object(crate, grad)
-        direction_one_hot = [
-            int(direction == dRIGHT) * np.sqrt(dist[crate]),
-            # for some reason, high feature values cause the model to converge slowly
-            int(direction == dDOWN) * np.sqrt(dist[crate]),
-            int(direction == dLEFT) * np.sqrt(dist[crate]),
-            int(direction == dUP) * np.sqrt(dist[crate])
-        ]
-        features.extend(direction_one_hot)
-
-    return features
-
-
-def distance_map(ax, ay, arena):
+def get_distance_map(ax, ay, arena):
     """
     :returns distance to every position and corresponding gradient calculated with Dijkstra
     """
@@ -482,7 +480,7 @@ def distance_map(ax, ay, arena):
     return dist, grad, crates
 
 
-def distance_map_with_temporaries(ax, ay, arena, others, bombs):
+def get_distance_map_with_temporaries(ax, ay, arena, others, bombs):
     """
     :returns distance to every position and corresponding gradient calculated with Dijkstra
     This one additionally considers enemies and bombs.
@@ -538,7 +536,7 @@ def nearest_objects(dist, objects, k=1):
     return objects
 
 
-def danger_map(game_state):
+def get_danger_map(game_state):
     """
     Returns maps with danger levels: 0 for no danger
     4 for active explosions
@@ -592,58 +590,35 @@ def direction_to_object(obj, grad):
     return direction
 
 
-def relative_bomb_positions(game_state, ax, ay):
-    bombs = game_state['bombs']
-    rel_positions = []
-    for (bx, by), countdown in bombs[:4]:  # Up to 4 bombs
-        rel_positions.append(bx - ax)
-        rel_positions.append(by - ay)
-        rel_positions.append(countdown)
-    while len(rel_positions) < 12:  # Ensure fixed length of 8 (4 bombs x 2 coordinates)
-        rel_positions.append(-1)  # Fill with -1 if fewer than 4 bombs
-    return rel_positions
-
-
-def player_map(ax, ay, others, arena):
-    players = np.full_like(arena, 0)
-    players[ax, ay] = 1
-    for (x, y) in others:
-        players[x, y] = -1
-
-    return players
-
-
-last_actions_deque = deque(maxlen=4)
-
-
-def last_k_actions():
+def last_k_actions(self):
     """
     :returns the last 4 actions.
     """
-    return list(last_actions_deque) + [4] * (last_actions_deque.maxlen - len(last_actions_deque))  # padded with WAIT
+    return list(self.last_actions_deque) + [4] * (
+                self.last_actions_deque.maxlen - len(self.last_actions_deque))  # padded with WAIT
 
 
-def last_action():
+def last_action(self):
     """
     returns the last action as a one-hot
     """
     one_hot = [0] * 6
-    if len(last_actions_deque):
-        one_hot[last_actions_deque[-1]] = 1
+    if len(self.last_actions_deque):
+        one_hot[self.last_actions_deque[-1]] = 1
     return one_hot
 
 
-def is_repeating_actions():
+def is_repeating_actions(self):
     """
     returns 1 when the agent is repeating actions such that it is stuck in one location,
     e.g. 4 times wait, left-right-left-right, up-down-up-down
     """
     # If fewer than 4 actions have been taken, it cannot be stuck
-    if len(last_actions_deque) < 4:
+    if len(self.last_actions_deque) < 4:
         return 0
 
     # Convert actions to a list for easier processing
-    actions = list(last_actions_deque)
+    actions = list(self.last_actions_deque)
 
     # Check if all actions are WAIT
     if actions.count(4) == 4:
@@ -656,10 +631,7 @@ def is_repeating_actions():
     return 0
 
 
-coordinate_history = deque([], maxlen=20)
-
-
-def is_repeating_positions():
+def is_repeating_positions(self):
     """
     Determines if the agent is likely stuck based on its movement history.
     :return: 1 if the agent is likely stuck, 0 otherwise.
@@ -667,11 +639,11 @@ def is_repeating_positions():
     """
     min_unique_positions = 5
     # Not enough history to make a decision
-    if len(coordinate_history) < 20:
+    if len(self.coordinate_history) < 20:
         return 0
 
     # Calculate the number of unique positions visited in the last 20 steps
-    unique_positions = len(set(coordinate_history))
+    unique_positions = len(set(self.coordinate_history))
 
     if unique_positions < min_unique_positions:
         return 1
@@ -702,6 +674,20 @@ def crates_reachable(ax, ay, field):
                     crate_count += 1
 
     return crate_count
+
+
+def neighboring_crate_count(ax, ay, field):
+    """
+    Reachable crates for the surrounding positions
+    """
+    neigh = [0, 0, 0, 0]
+    directions = [(ax + 1, ay), (ax, ay + 1), (ax - 1, ay), (ax, ay - 1)]  # Current, Right, Down, Left, Up
+
+    for i, d in enumerate(directions):
+        if field[d] == 0:
+            neigh[i] = crates_reachable(ax, ay, field)
+
+    return neigh
 
 
 def neighboring(ax, ay, game_state, k=2):
@@ -739,45 +725,11 @@ def neighboring(ax, ay, game_state, k=2):
     return neighbors.flatten()
 
 
-def free_distance(ax, ay, field):
+def path_can_be_blocked_by_enemy(dist, safe_pos, others, field, max_steps=5):
     """
-    :return: in all four directions the sqrt of the distance the agent can "see", e.g. if there is a wall next to the agent
-    zero in that direction. The distance can be at most 14 when the agent is at the edge of the field and a whole
-    row is free
-    """
-    distances = [0, 0, 0, 0]  # Distances for right, down, left, and up
-
-    # Right direction
-    for x in range(ax + 1, field.shape[0]):
-        if field[x, ay] != 0:
-            break
-        distances[0] += 1
-
-    # Down direction
-    for y in range(ay + 1, field.shape[1]):
-        if field[ax, y] != 0:
-            break
-        distances[1] += 1
-
-    # Left direction
-    for x in range(ax - 1, -1, -1):
-        if field[x, ay] != 0:
-            break
-        distances[2] += 1
-
-    # Up direction
-    for y in range(ay - 1, -1, -1):
-        if field[ax, y] != 0:
-            break
-        distances[3] += 1
-
-    return np.sqrt(distances)
-
-
-def path_can_be_blocked_by_enemy(dist, safe_pos, others, field, max_steps=4):
-    """
-    todo: quite inefficient. Slows down training significantly
+    todo: quite inefficient. Slows down training significantly. Does not seem to work properly
     Use BFS to check if an enemy can block the path to the safe tile within `max_steps` steps.
+    max_steps
     Compare the agent's distance to the safe tile and the enemy's distance.
     """
     sx, sy = safe_pos
@@ -786,50 +738,51 @@ def path_can_be_blocked_by_enemy(dist, safe_pos, others, field, max_steps=4):
     agent_distance = dist[sx, sy]
 
     if agent_distance > 4:
-        return False  # If the agent can't reach the safe tile, don't consider it blockable
+        return False
 
     # BFS setup for enemies
     for o in others:
-        ex, ey = o
-        enemy_queue = deque([(ex, ey, 0)])  # (enemy_x, enemy_y, current steps)
-        enemy_visited = {(ex, ey)}
+        if dist[o] < 10:
+            ex, ey = o
+            enemy_queue = deque([(ex, ey, 0)])  # (enemy_x, enemy_y, current steps)
+            enemy_visited = {(ex, ey)}
 
-        # BFS for the enemy to find if they can reach the safe tile before or at the same time as the agent
-        while enemy_queue:
-            x, y, steps = enemy_queue.popleft()
+            # BFS for the enemy to find if they can reach the safe tile before or at the same time as the agent
+            while enemy_queue:
+                x, y, steps = enemy_queue.popleft()
 
-            # Stop if we've exceeded the agent's steps or maximum allowed steps
-            if steps > agent_distance or steps > max_steps:
-                continue
+                # Stop if we've exceeded the agent's steps or maximum allowed steps
+                if steps > agent_distance + 1 or steps > max_steps:
+                    continue
 
-            # Check if the enemy is at the current position
-            if (x, y) == (sx, sy):
-                return True  # Enemy could block the path
+                # Check if the enemy is at the current position
+                if (x, y) == (sx, sy):
+                    return True  # Enemy could block the path
 
-            # Explore neighboring tiles
-            for dx, dy in directions:
-                nx, ny = x + dx, y + dy
-                if field[nx, ny] == 0 and (nx, ny) not in enemy_visited:  # Not visited yet
-                    enemy_visited.add((nx, ny))
-                    enemy_queue.append((nx, ny, steps + 1))
+                # Explore neighboring tiles
+                for (dx, dy) in directions:
+                    nx, ny = x + dx, y + dy
+                    if field[nx, ny] == 0 and (nx, ny) not in enemy_visited:  # Not visited yet
+                        enemy_visited.add((nx, ny))
+                        enemy_queue.append((nx, ny, steps + 1))
 
     return False
 
 
-def nearest_safe_tile(ax, ay, danger_map, others, bombs, dist, grad, in_danger, field):
-    # todo: problem: if an enemy explosion blocks the path so that it cannot reach the safe tile in time the enemy may die.
-    #  -> consider enemy explosions too, compare them with the steps, if it is active in a step the agent has to take
-    #  to reach the safe tile in time, that tile is not safe
-    #  !!!!!!!!! biggest problem atm!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+def get_nearest_safe_tile(ax, ay, danger_map, others, bombs, dist, grad, in_danger, field, predict, logger):
     """Idea: when an agent finds itself in the explosion radius of a bomb, this should point the agent
     in the direction of the nearest safe tile, especially useful for avoiding placing a bomb and then
-    walking in a dead end waiting for the bomb to blow up. Should also work for escaping enemy bombs."""
+    walking in a dead end waiting for the bomb to blow up. Should also work for escaping enemy bombs.
+    Predict is true when this is called in the context of predicting whether there is an escape route
+    if the agent drops a bomb now, in which case we cannot allow ignoring tiles blockable by enemies
+    to find a safe tile."""
 
     if not in_danger:
         return [0, 0, 0, 0]
 
     directions = [dRIGHT, dDOWN, dLEFT, dUP]
     distances = [15, 15, 15, 15]  # Default to 15 if no safe tile is found in a direction
+    nearest_safe_tiles = [None, None, None, None]
     radius = 4  # Limit the search to a radius of 5 tiles around the agent for efficiency
 
     # Define the search boundaries to ensure they are within the field limits
@@ -856,10 +809,15 @@ def nearest_safe_tile(ax, ay, danger_map, others, bombs, dist, grad, in_danger, 
                     if dir_to_tile == direction:
                         distance = dist[x, y]
                         direction_index = directions.index(direction)
-                        distances[direction_index] = min(distances[direction_index], distance)
+                        if distance < distances[direction_index]:
+                            distances[direction_index] = distance
+                            nearest_safe_tiles[direction_index] = (x, y)
+
+    logger.info("safe tiles distances after first pass: " + str(distances))
 
     # If all safe tiles are too far, perform a second pass allowing tiles blocked by enemies and lower danger level tiles
-    if all(d > 5 - danger_map[ax, ay] for d in distances):
+    # If we use this to make predictions whether dropping a bomb is safe, we do not want to allow tiles blocked by enemies
+    if not predict and all(d > 5 - danger_map[ax, ay] for d in distances):
         for direction in directions:
             for x in range(x_min, x_max):
                 for y in range(y_min, y_max):
@@ -868,13 +826,39 @@ def nearest_safe_tile(ax, ay, danger_map, others, bombs, dist, grad, in_danger, 
                         if dir_to_tile == direction:
                             distance = dist[x, y]
                             direction_index = directions.index(direction)
-                            distances[direction_index] = min(distances[direction_index], distance)
+                            if distance < distances[direction_index]:
+                                distances[direction_index] = distance
+                                nearest_safe_tiles[direction_index] = (x, y)
+
+    logger.info("safe tiles distances before check whether explosion on path: " + str(distances))
+
+    for i, safe_tile in enumerate(nearest_safe_tiles):
+        if distances[i] < 5 and not distances[i] == 0 and not distances.count(15) == 3:
+            x, y = ax, ay
+            while (x, y) != safe_tile:
+                dir_to_tile = direction_to_object(safe_tile, grad)
+
+                # Update cx, cy based on the direction and ensure it stays within bounds
+                if dir_to_tile == dRIGHT and x < 16:
+                    x += 1
+                elif dir_to_tile == dDOWN and y < 16:
+                    y += 1
+                elif dir_to_tile == dLEFT and x > 1:
+                    x -= 1
+                elif dir_to_tile == dUP and y > 1:
+                    y -= 1
+                else:
+                    break
+
+                if danger_map[x, y] > danger_map[ax, ay] and not ((x, y) == safe_tile and danger_map[safe_tile] < 3):
+                    distances[i] = 15
+                    break
 
     return distances
 
 
-def disallowed_actions(game_state, explosion_map, others, bombs, dist_t, grad_t, dist, grad, nearest_safe_t, dend_map, dend_list,
-                       can_drop_bomb_on_trapped, logger):
+def function_of_immortality(self, game_state, explosion_map, others, bombs, dist_t, grad_t, dist, grad, nearest_safe_t,
+                            dend_map, dend_list, can_drop_bomb_on_trapped, logger):
     """
     can be used as feature or to block those actions in the choose_action function
     that would lead to certain death
@@ -932,8 +916,9 @@ def disallowed_actions(game_state, explosion_map, others, bombs, dist_t, grad_t,
                     break
 
         # check whether the agent could escape the bomb
-        future_nearest_safe = nearest_safe_tile(ax, ay, future_explosion_map, others, bombs, dist_t, grad_t, True,
-                                                field)
+        future_nearest_safe = get_nearest_safe_tile(ax, ay, future_explosion_map, others, bombs, dist_t, grad_t, True,
+                                                    field, True, logger)
+        logger.info("Predicted future nearest safe if bomb: " + str(future_nearest_safe))
 
         # distance map ignores enemies and bombs, so we manually have to check whether something blocks that direction
         for i, d in enumerate(directions):
@@ -981,8 +966,10 @@ def disallowed_actions(game_state, explosion_map, others, bombs, dist_t, grad_t,
     for i, d in enumerate(directions):
         if explosion_map[d] == 4 or field[d] != 0 or d in bombs:
             disallowed[i] = 1
+    if not bomb_available:
+        disallowed[5] = 1
 
-    if is_repeating_positions() and disallowed[5] == 0:
+    if is_repeating_positions(self) and disallowed[5] == 0:
         disallowed[0:5] = [1] * 5  # forces agent to drop a bomb to become unstuck
 
     logger.info("DisallowedFinal: " + str(disallowed))
@@ -990,7 +977,7 @@ def disallowed_actions(game_state, explosion_map, others, bombs, dist_t, grad_t,
     return disallowed
 
 
-def enemies_distances_and_directions(dist, others, grad):
+def get_enemies_distances_and_directions(dist, others, grad):
     """
     :returns the direction to the nearest enemies as one-hot, an array of length 12.
     """
@@ -1016,7 +1003,7 @@ def enemies_distances_and_directions(dist, others, grad):
     return features
 
 
-def dead_end_map(field, others, bombs):
+def get_dead_end_map(field, others, bombs):
     """
     Returns map of all dead ends.
     The idea is to teach the agent to avoid these when enemies are nearby and to follow enemy agents inside
@@ -1054,9 +1041,10 @@ def dead_end_map(field, others, bombs):
 
             # Check if there is an enemy in this dead end
             enemy_in_dead_end = None
-            for ex, ey in others:
-                if (ex, ey) in dead_end_path:  # If enemy is in the dead end path
-                    enemy_in_dead_end = (ex, ey)
+            for other in others:
+                _, _, _, pos = other
+                if pos in dead_end_path:  # If enemy is in the dead end path
+                    enemy_in_dead_end = other
                     break
 
             dead_end_list.append({
@@ -1079,7 +1067,30 @@ def dead_end_map(field, others, bombs):
     return dead_end_map, dead_end_list
 
 
-def direction_to_enemy_in_dead_end(ax, ay, dead_end_list, dist, grad, dead_map):
+def track_bombs(self, bombs, others, explosion_map):  # bombs is list of positions, others is full version of others
+    """Returns for each bomb the bomb location and name of its owner. When a bomb appears that was
+    not in the list in the previous step, the enemy that laid it must be on it. Save it as owner of that bomb.
+    self.bomb_owners = Dictionary to track bomb owners: {bomb_position: agent_name}
+    """
+    # Check for new bombs that appeared in the current step
+    current_bomb_positions = [bomb_pos for bomb_pos in bombs]
+
+    for bomb_pos in current_bomb_positions:
+        if bomb_pos not in self.bomb_owners:
+            # Find the agent standing on the bomb position (who must have placed the bomb)
+            for agent_name, _, _, (ax, ay) in others:
+                if (ax, ay) == bomb_pos:
+                    self.bomb_owners[bomb_pos] = agent_name
+                    break
+
+    # Remove bombs that have exploded
+    exploded_bombs = [bomb_pos for bomb_pos in self.bomb_owners if explosion_map[bomb_pos] == 4]
+    for bomb_pos in exploded_bombs:
+        del self.bomb_owners[bomb_pos]
+    return self.bomb_owners
+
+
+def get_direction_to_enemy_in_dead_end(self, ax, ay, dead_end_list, dist, grad, dead_map, logger):
     """
     If there is the open end of a dead end containing an enemy closer to our agent than the manhattan distance of the
     enemy to the open end, return one-hot directions to the enemy.
@@ -1088,30 +1099,40 @@ def direction_to_enemy_in_dead_end(ax, ay, dead_end_list, dist, grad, dead_map):
     the enemy is dead (except when another agent blows up a crate that belonged to the closed end).
     This can then easily be rewarded, enabling the agent to learn this behavior without the need for artificial constraints.
     """
-    # todo: do not block enemy if other end of dead end is enemy bomb that would explode earlier than yours
-    #  -> prevent enemy from getting kill. Problem: we still want to block the enemy so it dies from its own bomb.
-    #  How to differentiate between the bombs of different enemies? -> if bomb is laid, mark it with the enemy number
+    directions = [(1, 0), (0, 1), (-1, 0), (0, -1)]  # Right, Down, Left, Up  # Current, Right, Down, Left, Up
     one_hot_direction = [0, 0, 0, 0]  # Placeholder for one-hot direction (Right, Down, Left, Up)
     can_trap_enemy = 0
 
     # Iterate over each dead end to find one that contains an enemy
     for dead_end in dead_end_list:
-        enemy_position = dead_end['enemy']
-        if enemy_position is None:
+        enemy = dead_end['enemy']
+        if enemy is None:
             continue  # No enemy in this dead end, skip
 
         open_end = dead_end['tile_before_open_end']
         closed_end = dead_end['closed_end']
-        ex, ey = enemy_position
+        current_enemy_name, _, _, (ex, ey) = enemy
 
         # Check if the agent is closer to the open end than the enemy is
         agent_to_open_end_dist = dist[open_end[0], open_end[1]]
         enemy_to_open_end_dist = abs(ex - open_end[0]) + abs(
             ey - open_end[1])  # Manhattan distance (ignores curved dead ends)
 
-        if agent_to_open_end_dist <= enemy_to_open_end_dist + 2:
-            # If agent is closer to the open end, find the direction to the enemy
-            direction = direction_to_object(enemy_position, grad)
+        if agent_to_open_end_dist <= enemy_to_open_end_dist + 4:  # 4 because
+            logger.info("Found nearby enemy in dead end: " + str(enemy[0]))
+            other_enemy_would_get_kill = False
+            for d in directions:
+                adjacent_pos = (closed_end[0] + d[0], closed_end[1] + d[1])
+                if adjacent_pos in self.bomb_owners:
+                    if self.bomb_owners[adjacent_pos] != current_enemy_name:
+                        # Enemy is blocked by the bomb of another enemy that would get the kill
+                        other_enemy_would_get_kill = True
+                        break  # No need to check further directions if one is found
+
+            logger.info("Other enemy would get kill: " + str(other_enemy_would_get_kill))
+            if other_enemy_would_get_kill:
+                continue
+            direction = direction_to_object((ex, ey), grad)
             if direction == dRIGHT:
                 one_hot_direction = [1, 0, 0, 0]
             elif direction == dDOWN:
@@ -1136,7 +1157,6 @@ def direction_to_enemy_in_dead_end(ax, ay, dead_end_list, dist, grad, dead_map):
 
 def do_not_enter_dead_end(ax, ay, dead_end_map, dead_end_list, others, dist_t, grad_t, dist, grad):
     """
-    # todo check whether this really works
     Do not enter a dead end if an enemy is nearby (within 4 tiles) and not inside the same dead end.
     :return: One-hot direction (inverted, blocked) to the dead-end entrance if an enemy is nearby, else a zero-vector.
     """
@@ -1171,7 +1191,8 @@ def do_not_enter_dead_end(ax, ay, dead_end_map, dead_end_list, others, dist_t, g
         # Use the direction_to_object to find the direction toward the exit
         direction = direction_to_object(current_dead_end['tile_before_open_end'], grad)
         if direction == dNONE:
-            direction = direction_to_object(current_dead_end['tile_before_open_end'], grad)  # exit blocked presumably by own bomb
+            direction = direction_to_object(current_dead_end['tile_before_open_end'],
+                                            grad)  # exit blocked presumably by own bomb
 
         # Convert direction to one-hot vector of blocked directions
         if direction == dRIGHT:
@@ -1273,10 +1294,7 @@ def do_not_get_surrounded(others, ax, ay, radius=5):
 # todo:
 """
 today:
-- fix bugs
-- pass more of the surrounding tiles to the agent for better decision making
-- do not block an enemy from escaping the bomb of another enemy so that the kill goes to the other enemy
-    makes a huge difference in classic
+- clean code
 
 
 Immortality:
@@ -1307,8 +1325,12 @@ Networks with layer sizes decreasing from input to output appear to be better. I
 
 Test our agent against others from github in 2 vs 2 and record avg scores
 
+LSTM cells, e.g. can remember spots where the bomb could destroy many crates
+
 
 Usability:
+
+Do something so that the logger outputs from the state to feature function output only once
 
 Add victory rate to plotter
 
