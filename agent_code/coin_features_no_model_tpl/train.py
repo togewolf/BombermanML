@@ -17,7 +17,7 @@ RECORD_ENEMY_TRANSITIONS = 1.0  # record enemy transitions with probability ...
 # Events
 MOVED_TOWARD_COIN = 'MOVED_TOWARD_COIN'  # toward the closest coin
 MOVED_TOWARD_CRATE = 'MOVED_TOWARD_CRATE'
-DROPPED_BOMB_THAT_CAN_DESTROY_CRATE = 'DROPPED_BOMB_THAT_CAN_DESTROY_CRATE'  # reward for each crate
+DROPPED_BOMB_THAT_CAN_DESTROY_CRATE = 'DROPPED_BOMB_THAT_CAN_DESTROY_CRATE_BONUS_FOR_AMOUNT'  # reward for each crate
 DROPPED_BOMB_WHILE_ENEMY_NEAR = 'DROPPED_BOMB_WHILE_ENEMY_NEAR'  # reward for each enemy
 IS_IN_BOMB_EXPLOSION_RADIUS = 'IS_IN_BOMB_EXPLOSION_RADIUS'  # perhaps differentiate between enemy and own bombs
 USELESS_BOMB = 'USELESS BOMB'  # no crate or enemy reachable by bomb  # or just punish each dropped bomb and reward usefulness
@@ -134,7 +134,7 @@ def reward_from_events(self, events: List[str]) -> int:
         MOVED_TOWARD_COIN: 0.2,  # todo: get those from features (features of old game state)
         # MOVED_TOWARD_CRATE: 0.1,
         MOVED_IN_BLOCKED_DIRECTION: -1,
-        # DROPPED_BOMB_THAT_CAN_DESTROY_CRATE: 0.2,  # 0.2 per crate that the bomb can reach  # todo here
+        # DROPPED_BOMB_THAT_CAN_DESTROY_CRATE_BONUS_FOR_AMOUNT: 0.2,  # 0.2 per crate that the bomb can reach  # todo here
         # DROPPED_BOMB_WHILE_ENEMY_NEAR: 0.4,  # todo here
         # IS_IN_BOMB_EXPLOSION_RADIUS: -0.2,
     }
