@@ -242,14 +242,18 @@ class Agent:
         :param train:       Whether training mode and with that exploration is enabled
         :return:            Chosen action as index in ACTION array defined in utils.py
         """
+        blocked = state['lin_features'][20:26]
+
         # epsilon greed
         if np.random.random() < self.model.epsilon and train:
             p = [1, 1, 1, 1, .5, .5]
 
+            for i in range(6):
+                if blocked[i]:
+                    p[i] = 0
+
             self.logger.info("Chose random action (Eps = " + str(self.model.epsilon) + ")")
             return random.choices(range(6), weights=p, k=1)[0]
-
-        blocked = state['lin_features'][20:26]
 
         # transfer state to GPU
         state = {
@@ -258,6 +262,10 @@ class Agent:
         }
         # use model to evaluate actions, then pick optimal action
         actions = self.model.forward(state, train).squeeze()
+        for i in range(6):
+            if blocked[i]:
+                actions[i] = -9999
+
         action = torch.argmax(actions).item()
 
         # action_probabilities = actions.clone().detach().softmax(dim=1).squeeze()
