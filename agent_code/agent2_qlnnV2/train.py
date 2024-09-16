@@ -92,10 +92,10 @@ def game_events_occurred(self, old_game_state: dict, self_action: str, new_game_
                     if abs(ax - ox) + abs(ay - oy) < 3:
                         events.append(DROPPED_BOMB_WHILE_ENEMY_NEAR)  # higher reward for dropping it closer
 
-        if old_features[34] == 1:
+        if old_features[28] == 1:
             events.append(DROPPED_BOMB_NEXT_TO_ENEMY)  # reward for dropping it directly next to the enemy
 
-        if old_features[33] == 1:
+        if old_features[27] == 1:
             events.append(DROPPED_BOMB_ON_TRAPPED_ENEMY)
 
     if self.previous_action == 'BOMB' and self_action == 'WAIT':
@@ -191,17 +191,17 @@ def reward_from_events(self, events: List[str]) -> int:
     Here you can modify the rewards your agent get to en/discourage certain behavior.
     """
     game_rewards = {
-        e.MOVED_UP: -0.2,
-        e.MOVED_DOWN: -0.2,
-        e.MOVED_LEFT: -0.2,
-        e.MOVED_RIGHT: -0.2,
-        e.WAITED: -0.5,
+        e.MOVED_UP: -0.1,
+        e.MOVED_DOWN: -0.1,
+        e.MOVED_LEFT: -0.1,
+        e.MOVED_RIGHT: -0.1,
+        e.WAITED: -0.3,
         e.COIN_COLLECTED: 5,
-        e.KILLED_OPPONENT: 7,
+        e.KILLED_OPPONENT: 8,
         # e.KILLED_SELF: -5,  # better to kill oneself than if the enemy gets the kill
-        e.GOT_KILLED: -10,
+        e.GOT_KILLED: -12,
         e.INVALID_ACTION: -1,
-        e.OPPONENT_ELIMINATED: 3,
+        e.OPPONENT_ELIMINATED: 4,
         e.BOMB_DROPPED: -0.5,
         e.SURVIVED_ROUND: 10,
         DROPPED_BOMB_THAT_CAN_DESTROY_CRATE_BONUS_FOR_AMOUNT: 0.75,  # reward per crate that the bomb can reach
@@ -211,8 +211,10 @@ def reward_from_events(self, events: List[str]) -> int:
         DROPPED_BOMB_THAT_CAN_DESTROY_CRATE: 2,
         DROPPED_BOMB_NOT_AT_CROSSING: -1,
         DID_OPPOSITE_OF_LAST_ACTION: -0.2,
-        FOLLOWED_DIRECTION_SUGGESTION: 0.3,  # too high value causes oscillation
+        FOLLOWED_DIRECTION_SUGGESTION: 0.3,
         WAITED_ON_A_BOMB: -1  # sometimes it is okay or necessary to do that, but usually it is best to avoid.
+        # todo: test whether "punishment for existence makes sense" -> the agent has no incite to finish the game fast
+        #  if it continually collects rewards while staying alive, thus does not learn to be as aggressive as it should be
     }
     reward_sum = sum(game_rewards[event] for event in events if event in game_rewards)
     self.logger.info(f"Awarded {reward_sum} for events {', '.join(events)}")
