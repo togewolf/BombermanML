@@ -196,7 +196,7 @@ def reward_from_events(self, events: List[str]) -> int:
         e.MOVED_LEFT: -0.1,
         e.MOVED_RIGHT: -0.1,
         e.WAITED: -0.3,
-        e.COIN_COLLECTED: 5,
+        e.COIN_COLLECTED: 8,
         e.KILLED_OPPONENT: 8,
         # e.KILLED_SELF: -5,  # better to kill oneself than if the enemy gets the kill
         e.GOT_KILLED: -12,
@@ -213,9 +213,9 @@ def reward_from_events(self, events: List[str]) -> int:
         DID_OPPOSITE_OF_LAST_ACTION: -0.2,
         FOLLOWED_DIRECTION_SUGGESTION: 0.3,
         WAITED_ON_A_BOMB: -1  # sometimes it is okay or necessary to do that, but usually it is best to avoid.
-        # todo: test whether "punishment for existence makes sense" -> the agent has no incite to finish the game fast
-        #  if it continually collects rewards while staying alive, thus does not learn to be as aggressive as it should be
+
     }
-    reward_sum = sum(game_rewards[event] for event in events if event in game_rewards)
+    balance_punishment = 0  # todo test whether this makes sense
+    reward_sum = sum(game_rewards[event] for event in events if event in game_rewards) + balance_punishment
     self.logger.info(f"Awarded {reward_sum} for events {', '.join(events)}")
     return reward_sum
