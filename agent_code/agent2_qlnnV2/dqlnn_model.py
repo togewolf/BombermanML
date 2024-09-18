@@ -1373,6 +1373,7 @@ Test Runs:
 08 even smaller layers: 2*V2+2*RB, 150 rounds, 8/8/6 -> much worse performance
 09 try midsize: 2*V2+2*RB, 150 rounds, 16/16/6 -> also not se yellow from se egg: 32 width seems necessary
 10 very deeeeep: 2*V2+2*RB, 150 rounds, 8/8/8/8/8/6 -> does depth change anything? no
+11 train loot crate base on standard scenario: 2*V2+2*RB, 150 rounds in loot crate, 150 rounds in standard -> no visible improvement
 
 Scientific investigations:
 
