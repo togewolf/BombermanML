@@ -89,8 +89,8 @@ class Agent:
         self.coordinate_history = deque([], maxlen=20)
 
         # network dimensions
-        self.Q_eval = DeepQNetwork(self.lr, input_dims=input_dims, l1_dims=2 ** 9, l2_dims=2 ** 9,
-                                   l3_dims=2 ** 8, l4_dims=2 ** 7, l5_dims=2 ** 7)
+        self.Q_eval = DeepQNetwork(self.lr, input_dims=input_dims, l1_dims=8, l2_dims=8,
+                                   l3_dims=8, l4_dims=8, l5_dims=8)
 
         self.state_memory = np.zeros((self.mem_size, input_dims), dtype=np.float32)
         self.new_state_memory = np.zeros((self.mem_size, input_dims), dtype=np.float32)
@@ -540,7 +540,7 @@ def get_danger_map(game_state):
     """
     bombs = game_state['bombs']
     field = game_state['field']
-    explosion_map = np.copy(game_state['danger_map'])  # We do not want to accidentally change the original
+    explosion_map = np.copy(game_state['explosion_map'])  # We do not want to accidentally change the original
     explosion_radius = 3  # Bombs affect 3 fields in each direction
 
     # Set all active explosions to danger level 4
@@ -1319,7 +1319,17 @@ Things our features are just not good enough for, yet:
 - prioritizing attacking 'weak' enemies - there will be teams with bad implementations we could farm points off of
     example: agent does not move -> keep location history of other agents and move toward "braindead" agents
 
-
+Test Runs:
+01 loot crate base: 2*V2+2*RB, loot_crate, 100 rounds
+02 standard base: 2*V2+2*RB, 100 rounds
+03 long training: 2*V2+2*RB, 300 rounds -> no visible improvement
+04 more layers: 2*V2+2*RB, 200 rounds, 128/128/64/.../64/6 (10 Layer) -> no visible improvement
+05 against itself: 4*V2, 150 rounds, then 150 rounds against rule_based, less layers again -> after switching to rule_based no visible improvement
+06 less layers: 2*V2+2*RB, 150 rounds, 128/128/6 -> seems just as good
+07 smaller less layers: 2*V2+2*RB, 150 rounds, 32/32/6 -> also similar performance after enough time?
+08 even smaller layers: 2*V2+2*RB, 150 rounds, 8/8/6 -> much worse performance
+09 try midsize: 2*V2+2*RB, 150 rounds, 16/16/6 -> also not se yellow from se egg: 32 width seems necessary
+10 very deeeeep: 2*V2+2*RB, 150 rounds, 8/8/8/8/8/6 -> does depth change anything? no
 
 Scientific investigations:
 
