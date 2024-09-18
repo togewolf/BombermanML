@@ -280,6 +280,8 @@ def state_to_features(self, game_state: dict, logger) -> np.array:
     features.append(int(is_next_to_enemy(ax, ay, others)))  # 28
     features.extend(neighboring_explosions_or_coins(ax, ay, danger_map, coins))  # 29-33
     features.extend(nearest_coin_dist(dist, coins, grad))  # 34-37
+    features.extend(get_enemies_relative_positions(ax, ay, others))  # 38-49
+    features.extend([np.sqrt(ax), np.sqrt(ay)])  # 50-51  Idea: learn to avoid borders and especially the corners
     # features.extend(neighboring_crate_count(ax, ay, field))
     # features.extend(do_not_get_surrounded(others, ax, ay, radius=5))
 
@@ -333,14 +335,14 @@ def direction_suggestion(ax, ay, danger_map, bombs, enemies, field, coins, crate
         nearest_coin = nearest_objects(dist, coins, 1)
         dist_c = dist[nearest_coin[0]]
 
+    if dist_c < 30:
+        logger.info("Current goal: coin")
+        return get_k_nearest_objects(dist_t, coins, grad_t)
+
     safe_direction = safer_direction(ax, ay, danger_map, bombs, enemies, field)
     if any(safe_direction):
         logger.info("Current goal: safest direction: " + str(safe_direction))
         return safe_direction
-
-    if dist_c < 30:
-        logger.info("Current goal: coin")
-        return get_k_nearest_objects(dist_t, coins, grad_t)
 
     coins_left_in_crates = True
     if collected_coins_all == 9 or collected_coins_all == 50:  # classic or loot-crate or coin-heaven
@@ -353,6 +355,17 @@ def direction_suggestion(ax, ay, danger_map, bombs, enemies, field, coins, crate
 
     if len(others):
         logger.info("Current goal: enemy")
+        # If is at border of map, suggest direction away from border, because it is easy to be killed there
+        if ax < 3 or ax > 14 or ay < 3 or ay > 14:
+            logger.info("Current goal: move away from border")
+            direction_to_center = direction_to_object((8, 8), grad)
+            direction_one_hot = [
+                int(direction_to_center == dRIGHT),
+                int(direction_to_center == dDOWN),
+                int(direction_to_center == dLEFT),
+                int(direction_to_center == dUP)
+            ]
+            return direction_one_hot
         return get_k_nearest_objects(dist, others, grad)
 
     # might as well blow up the last empty crates
@@ -632,7 +645,7 @@ def is_repeating_positions(self):
     :return: 1 if the agent is likely stuck, 0 otherwise.
     Not called as a feature, but to make a stuck agent drop a bomb to force it to move.
     """
-    min_unique_positions = 4
+    min_unique_positions = 5
     # Not enough history to make a decision
     if len(self.coordinate_history) < 20:
         return 0
@@ -863,20 +876,20 @@ def function_of_immortality(self, game_state, danger_map, others, bombs, dist_t,
     # Disallow bomb placement if it would likely lead to self death
     if bomb_available:
         # Predict the danger level after placing a bomb
-        future_explosion_map = np.copy(danger_map)
-        future_explosion_map[ax, ay] = 1  # Bomb placed on current position
+        future_danger_map = np.copy(danger_map)
+        future_danger_map[ax, ay] = 1  # Bomb placed on current position
         for dx, dy in [(-1, 0), (1, 0), (0, -1), (0, 1)]:
             for r in range(1, 4):
                 x, y = ax + r * dx, ay + r * dy
                 if 0 < x < 17 and 0 < y < 17:
                     if field[x, y] == -1:  # Stop at walls
                         break
-                    future_explosion_map[x, y] = 1
+                    future_danger_map[x, y] = 1
                 else:
                     break
 
         # Predict the nearest safe tile if it laid a bomb
-        future_nearest_safe = get_nearest_safe_tile(ax, ay, future_explosion_map, others, bombs, dist_t, grad_t, dist,
+        future_nearest_safe = get_nearest_safe_tile(ax, ay, future_danger_map, others, bombs, dist_t, grad_t, dist,
                                                     True, field, True, logger)
         logger.info("Predicted future nearest safe if bomb: " + str(future_nearest_safe))
 
@@ -941,8 +954,6 @@ def function_of_immortality(self, game_state, danger_map, others, bombs, dist_t,
 def get_enemies_distances_and_directions(dist, others, grad):
     """
     :returns the direction to the nearest enemies as one-hot scaled by the sqrt of their distance, an array of length 12.
-    Todo: not one hot, two of the entries of the four for each enemy should be non-zero, so that their exact
-     relative position is known.
     """
 
     features = []
@@ -964,6 +975,38 @@ def get_enemies_distances_and_directions(dist, others, grad):
         features.extend([0, 0, 0, 0])
 
     return features
+
+
+def get_enemies_relative_positions(ax, ay, others):
+    """
+    :returns the direction to the nearest enemies as one-hot scaled by the sqrt of their distance, an array of length 12.
+    """
+
+    features = []
+
+    for other in others[:3]:
+        ox, oy = other  # Enemy's position
+
+        # Compute relative position (directional vector) of the enemy
+        dx = ox - ax  # Horizontal difference
+        dy = oy - ay  # Vertical difference
+
+        # Horizontal component (Right/Left)
+        right_component = max(0, dx)
+        left_component = max(0, -dx)
+
+        # Vertical component (Down/Up)
+        down_component = max(0, dy)
+        up_component = max(0, -dy)
+
+        # Add these components for the current enemy to the feature list
+        features.extend([right_component, down_component, left_component, up_component])
+
+    # Pad with zeros if there are fewer than 3 enemies
+    while len(features) < 12:
+        features.extend([0, 0, 0, 0])
+
+    return np.sqrt(features)
 
 
 def get_dead_end_map(field, others, bombs):
