@@ -26,7 +26,7 @@ def setup_training(self):
     This is called after `setup` in callbacks.py.
     :param self: This object is passed to all callbacks, and you can set arbitrary values.
     """
-    self.save_frequency = 25  # store a snapshot every n rounds
+    self.save_frequency = 100  # store a snapshot every n rounds
     self.previous_action = 'WAIT'
 
 
