@@ -718,8 +718,8 @@ def path_can_be_blocked_by_enemy(dist_agent, safe_positions, others, field, pred
                 dist_enemy_to_safe = dist_enemy[safe_pos]
 
                 # If the enemy can reach the safe tile before or at the same time as the agent, it is not safe
-                # if predict:
-                #    dist_enemy_to_safe -= 1  # The enemy could move closer while our agent places a bomb
+                if predict:
+                   dist_enemy_to_safe -= 1  # The enemy could move closer while our agent places a bomb
                 if dist_enemy_to_safe <= dist_agent_to_safe:
                     safe_mask[i] = False
 
@@ -1321,7 +1321,7 @@ def safer_direction(ax, ay, danger_map, bombs, enemies, field):
             x, y = ax, ay
 
             # Create a cone-shaped area of tiles
-            for v in range(1, 6):  # Cone of length 5
+            for v in range(1, 5):  # Cone of length 4
                 for h in range(-v, v + 1):
                     nx, ny = x + dx * v + h * dy, y + dy * v + h * dx
                     tiles_in_this_direction.append((nx, ny))
