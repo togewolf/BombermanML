@@ -8,8 +8,6 @@ from collections import deque
 import random
 from heapq import heapify, heappop, heappush
 
-from .utils import Action, Direction
-
 
 class DeepQNetwork(nn.Module):
     def __init__(self, lr, input_dims, l1_dims, l2_dims, l3_dims, l4_dims, l5_dims, dropout_rate=0.1):
@@ -116,7 +114,7 @@ class Agent:
 
     def choose_action(self, game_state, train):
         features = state_to_features(self, game_state, self.logger)
-        disallowed = features[8:14]  # Result of function of immortality
+        disallowed = features[8:14]  # Result of function of immortality  # todo: test whether removing this and instead using punishment in train makes sense
 
         if np.random.random() > self.epsilon or not train:
             state = torch.tensor([features], dtype=torch.float32).to(self.Q_eval.device)
@@ -248,10 +246,14 @@ def state_to_features(self, game_state: dict, logger) -> np.array:
 
     collected_coins_all = coins_collected(self, others_full, self_score)
 
-    bomb_owners = track_bombs(self, bombs, others_full, danger_map)
+    bomb_owners = track_bombs(self, bombs, others_full, danger_map)  # call this function every step!
 
     suggestion = direction_suggestion(ax, ay, danger_map, bombs, others, field, coins, crates, others, dist_t, grad_t,
                                       dist, grad, direction_to_enemy_in_dead_end, collected_coins_all, logger)
+
+    # tunnels, tunnel_list = get_tunnel_map(field, others, bombs, dist)
+    # logger.info(tunnels)
+    # logger.info(tunnel_list)
 
     # logger.info("In danger: " + str(in_danger))
     # logger.info(danger_map)
@@ -267,7 +269,7 @@ def state_to_features(self, game_state: dict, logger) -> np.array:
     # logger.info("bomb-owners: " + str(bomb_owners))
     # logger.info("Coins collected so far: " + str(collected_coins_all))
 
-    # features
+    # Features
     features.append(int(bomb_available))  # feat 0
     features.append(crates_reachable(ax, ay, field))  # feat 1
     features.append(in_danger)  # feat 2
@@ -281,7 +283,7 @@ def state_to_features(self, game_state: dict, logger) -> np.array:
     features.extend(neighboring_explosions_or_coins(ax, ay, danger_map, coins))  # 29-33
     features.extend(nearest_coin_dist(dist, coins, grad))  # 34-37
     features.extend(get_enemies_relative_positions(ax, ay, others))  # 38-49
-    features.extend([np.sqrt(ax), np.sqrt(ay)])  # 50-51  Idea: learn to avoid borders and especially the corners
+    features.extend([0.1 * ax, 0.1 * ay])  # 50-51  Idea: learn to avoid dwelling at the borders and especially the corners
     # features.extend(neighboring_crate_count(ax, ay, field))
     # features.extend(do_not_get_surrounded(others, ax, ay, radius=5))
 
@@ -716,8 +718,8 @@ def path_can_be_blocked_by_enemy(dist_agent, safe_positions, others, field, pred
                 dist_enemy_to_safe = dist_enemy[safe_pos]
 
                 # If the enemy can reach the safe tile before or at the same time as the agent, it is not safe
-                #if predict:
-                    #dist_enemy_to_safe -= 1  # The enemy could move closer while our agent places a bomb
+                # if predict:
+                #    dist_enemy_to_safe -= 1  # The enemy could move closer while our agent places a bomb
                 if dist_enemy_to_safe <= dist_agent_to_safe:
                     safe_mask[i] = False
 
@@ -923,7 +925,7 @@ def function_of_immortality(self, game_state, danger_map, others, bombs, dist_t,
         disallowed[0:4] = [1] * 4  # If it has no bomb, at least block the enemy in the dead end
 
     # Try to prevent getting "in die Zange genommen".
-    # todo: improve this, a lot. The agent still dies exactly because of this
+    # todo: remove this and instead append the result of the get_dangerous_tunnel_list function to the dend_list once it works
     nearby_enemies = [other for other in others if dist_t[other[0], other[1]] <= 2]
     if len(nearby_enemies) >= 2:
         # Check if agent is trapped between two walls
@@ -949,18 +951,15 @@ def function_of_immortality(self, game_state, danger_map, others, bombs, dist_t,
     return disallowed
 
 
-######################################################################### Reviewed and cleaned until here
-
 def get_enemies_distances_and_directions(dist, others, grad):
     """
     :returns the direction to the nearest enemies as one-hot scaled by the sqrt of their distance, an array of length 12.
     """
-
     features = []
     max_dist = np.sqrt(
         30)  # Max distance value to be used in the features, the high INF value for the distances "confuses" the model
 
-    for other in others[:3]:  # Limit to 3 enemies
+    for other in others[:3]:  # There can be only three enemies.
         direction = direction_to_object(other, grad)
         direction_one_hot = [
             int(direction == dRIGHT) * min(np.sqrt(dist[other]), max_dist),
@@ -979,9 +978,8 @@ def get_enemies_distances_and_directions(dist, others, grad):
 
 def get_enemies_relative_positions(ax, ay, others):
     """
-    :returns the direction to the nearest enemies as one-hot scaled by the sqrt of their distance, an array of length 12.
+    :returns the sqrt of the relative positions of the enemies
     """
-
     features = []
 
     for other in others[:3]:
@@ -1012,6 +1010,7 @@ def get_enemies_relative_positions(ax, ay, others):
 def get_dead_end_map(field, others, bombs):
     """
     Returns map of all dead ends.
+    "others" contains the full version, not just the positions.
     The idea is to teach the agent to avoid these when enemies are nearby and to follow enemy agents inside
     and then placing a bomb behind them when they make the mistake of entering one.
     """
@@ -1042,7 +1041,7 @@ def get_dead_end_map(field, others, bombs):
                 break  # If more than one neighbor is open, it's not part of a dead end
 
         if len(dead_end_path) > 1:
-            for px, py in dead_end_path:  # [:-1] if you do not want to mark the tile before the dead end
+            for px, py in dead_end_path:
                 dead_end_map[px, py] = 1
 
             # Check if there is an enemy in this dead end
@@ -1098,6 +1097,7 @@ def track_bombs(self, bombs, others, explosion_map):  # bombs is list of positio
 
 def get_direction_to_enemy_in_dead_end(self, ax, ay, dead_end_list, dist, grad, dead_map, logger):
     """
+    todo: even though it is in suggested direction, add this as separate feature and reward it heavily
     If there is the open end of a dead end containing an enemy closer to our agent than the manhattan distance of the
     enemy to the open end, return one-hot directions to the enemy.
     Also return whether the agent is less than four steps away
@@ -1124,7 +1124,7 @@ def get_direction_to_enemy_in_dead_end(self, ax, ay, dead_end_list, dist, grad, 
         enemy_to_open_end_dist = abs(ex - open_end[0]) + abs(
             ey - open_end[1])  # Manhattan distance (ignores curved dead ends)
 
-        if agent_to_open_end_dist <= enemy_to_open_end_dist + 4:  # 4 because
+        if agent_to_open_end_dist <= enemy_to_open_end_dist + 4:  # 4 because whatever
             logger.info("Found nearby enemy in dead end: " + str(enemy[0]))
             other_enemy_would_get_kill = False
             for d in directions:
@@ -1163,7 +1163,7 @@ def get_direction_to_enemy_in_dead_end(self, ax, ay, dead_end_list, dist, grad, 
 
 def do_not_the_dead_end(ax, ay, dead_end_list, others, dist, grad):
     """
-    Do not enter a dead end if an enemy is nearby (within 4 tiles) and not inside the same dead end.
+    Do not enter a dead end if an enemy is nearby and not inside the same dead end.
     Also, leave the dead end immediately if otherwise an enemy could reach the exit faster than you.
     :return: One-hot direction (inverted, blocked) to the dead-end entrance if an enemy is nearby, else a zero-vector.
     """
@@ -1184,7 +1184,7 @@ def do_not_the_dead_end(ax, ay, dead_end_list, others, dist, grad):
     if (ax, ay) == current_dead_end['tile_before_open_end']:
         is_on_tile_before = True
 
-    nearby_enemies = [other for other in others]  # if dist[other] < 10] does not work
+    nearby_enemies = [other for other in others]  # If dist[other] < 10] does not work, but it is not essential
     nearby_enemies = [enemy for enemy in nearby_enemies if enemy not in current_dead_end['path']]
 
     if not nearby_enemies:
@@ -1203,7 +1203,7 @@ def do_not_the_dead_end(ax, ay, dead_end_list, others, dist, grad):
         direction = direction_to_object(current_dead_end['tile_before_open_end'], grad)
         if direction == dNONE:
             direction = direction_to_object(current_dead_end['tile_before_open_end'],
-                                            grad)  # exit blocked, presumably by own bomb
+                                            grad)  # Exit blocked, presumably by own bomb
 
         # Convert direction to one-hot vector of blocked directions
         if direction == dRIGHT:
@@ -1216,7 +1216,6 @@ def do_not_the_dead_end(ax, ay, dead_end_list, others, dist, grad):
             one_hot_direction = [1, 1, 1, 0]
 
         if not any(one_hot_direction):
-            # print("Escape dead end:" + str(current_dead_end) + "position:" + str(ax) + str(ay))
             directions = [(ax + 1, ay), (ax, ay + 1), (ax - 1, ay), (ax, ay - 1)]  # Right, Down, Left, Up
             for i, d in enumerate(directions):
                 if d == current_dead_end['open_end']:
@@ -1228,7 +1227,6 @@ def do_not_the_dead_end(ax, ay, dead_end_list, others, dist, grad):
 def is_next_to_enemy(ax, ay, others, d=1):
     """
     Checks if the agent is adjacent (d=1) or close to any enemy.
-    Can be used to reward attacking enemy agents when they are close.
     """
     for ex, ey in others:
         if abs(ax - ex) + abs(ay - ey) == d:
@@ -1323,7 +1321,7 @@ def safer_direction(ax, ay, danger_map, bombs, enemies, field):
             x, y = ax, ay
 
             # Create a cone-shaped area of tiles
-            for v in range(1, 5):  # Cone length of 4
+            for v in range(1, 6):  # Cone of length 5
                 for h in range(-v, v + 1):
                     nx, ny = x + dx * v + h * dy, y + dy * v + h * dx
                     tiles_in_this_direction.append((nx, ny))
@@ -1331,7 +1329,7 @@ def safer_direction(ax, ay, danger_map, bombs, enemies, field):
             for tile in tiles_in_this_direction:
                 if 0 < tile[0] < 17 and 0 < tile[1] < 17:
                     if tile in bombs or tile in enemies:
-                        danger_levels[i] += 3
+                        danger_levels[i] += 5
                     if danger_map[tile] > 0:
                         danger_levels[i] += 1
 
@@ -1341,10 +1339,35 @@ def safer_direction(ax, ay, danger_map, bombs, enemies, field):
     return [1 if i == best_direction_index else 0 for i in range(4)]
 
 
+def get_dangerous_tunnel_list(field, others, bombs, dist_agent):
+    """
+    todo get this to work
+    Returns a tunnel map and adds tunnels that can be blocked by enemies to the dead end list.
+    A tunnel is a sequence of tiles with exactly 2 open neighbors, one at each end.
+    If the far end of the tunnel can be blocked by an enemy, the entire tunnel is treated as a dead end.
+    """
+    directions = [(1, 0), (0, 1), (-1, 0), (0, -1)]  # Right, Down, Left, Up
+    tunnel_list = []
+
+    # Step 1: find all the tunnels. The end closer to the agent should be the "open end", the tile before that
+    # the "tile before open end", save in dict, also save "tile before far end", the tile before the last
+    # tunnel tile, this should have more than 2 open neighbors.
+    # Step 2: make sure each tunnel exists only once in the dictionary, no subset of a tunnel should be there as its own tunnel
+    # Step 3: collect all "tiles before far end", run the filter path_can_be_blocked_by_enemy.
+    # Only those that can be blocked will be left, remove the tunnels that do not have this as "tile before far end"
+    # return the list, without the tiles before far end so that it can be easily appended to the dead_end_list
+
+    return tunnel_list
+
+
 # todo:
 """
-today:
-- clean code, order all the functions in a plausible order (importance, grouped by purpose etc.)
+- order all the functions in a plausible order (importance, grouped by purpose etc.)
+- increase agent kill rate.
+ ideas: make it a lot more aggressive somehow
+    if coin in dead end and enemy nearby, do not collect coin, 
+    but wait near the entrance for the enemy to enter
+
 
 
 Immortality:
@@ -1357,8 +1380,7 @@ How to make the agent better aside from that:
 Things our features are just not good enough for, yet:
 - if bomb next to crate, do not let enemy be closer to crate so that if there is a coin the enemy gets it
 - prioritizing coins (prefer to collect those that would be collected by an enemy if the agent collected another first)
-- getting kills in complex multi-agent situations (make get_enemy_distances_and_directions better by not making each a
-    one-hot, instead there should always be 2 non zero-values, the relative coordinates.)
+- getting kills in complex multi-agent situations
 - prioritizing attacking 'weak' enemies - there will be teams with bad implementations we could farm points off of
     example: agent does not move -> keep location history of other agents and move toward "braindead" agents
 
@@ -1381,18 +1403,8 @@ LSTM cells, e.g. can remember spots where the bomb could destroy many crates
 
 Usability:
 
-Do something so that the logger outputs from the state to feature function output only once
-
-Add victory rate to plotter
-
 Save current version of the model in another test folder, so we can test future versions against that one 
 to determine if there has been improvement
 
-Code cleanup! Make the code more similar to Oles version
-
-Remove unneeded functions
-
-How can the training process be accelerated? Add logger statements for what functions need lots of time.
-supposition: it is the function of immortality / calculating the distance map twice with and without bombs and enemies
 
 """

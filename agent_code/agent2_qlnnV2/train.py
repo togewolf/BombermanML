@@ -197,15 +197,15 @@ def reward_from_events(self, events: List[str]) -> int:
         e.MOVED_RIGHT: -0.1,
         e.WAITED: -0.3,
         e.COIN_COLLECTED: 8,
-        e.KILLED_OPPONENT: 8,
+        e.KILLED_OPPONENT: 10,
         # e.KILLED_SELF: -5,  # better to kill oneself than if the enemy gets the kill
-        e.GOT_KILLED: -12,
+        e.GOT_KILLED: -10,
         e.INVALID_ACTION: -1,
         e.OPPONENT_ELIMINATED: 4,
         e.BOMB_DROPPED: -0.5,
         e.SURVIVED_ROUND: 10,
         DROPPED_BOMB_THAT_CAN_DESTROY_CRATE_BONUS_FOR_AMOUNT: 0.75,  # reward per crate that the bomb can reach
-        DROPPED_BOMB_WHILE_ENEMY_NEAR: 2,
+        DROPPED_BOMB_WHILE_ENEMY_NEAR: 3,
         DROPPED_BOMB_NEXT_TO_ENEMY: 2,
         IS_REPEATING_ACTIONS: -0.5,
         DROPPED_BOMB_THAT_CAN_DESTROY_CRATE: 2,
