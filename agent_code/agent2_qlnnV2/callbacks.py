@@ -40,7 +40,7 @@ def setup(self):
         if not torch.cuda.is_available():
             self.logger.info("GPU not found!")
         self.model = torch.load(model_filename, map_location=device)
-        self.model.device = device
+        self.model.Q_eval.device = device
 
 
 def act(self, game_state: dict) -> str:
