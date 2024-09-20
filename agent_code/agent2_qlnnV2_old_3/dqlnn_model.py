@@ -540,7 +540,7 @@ def get_danger_map(game_state):
     """
     bombs = game_state['bombs']
     field = game_state['field']
-    explosion_map = np.copy(game_state['danger_map'])  # We do not want to accidentally change the original
+    explosion_map = np.copy(game_state['explosion_map'])  # We do not want to accidentally change the original
     explosion_radius = 3  # Bombs affect 3 fields in each direction
 
     # Set all active explosions to danger level 4
