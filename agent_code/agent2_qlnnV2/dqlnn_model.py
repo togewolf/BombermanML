@@ -63,7 +63,7 @@ class DeepQNetwork(nn.Module):
             x = self.dropout5(x)
         actions = self.lo(x)
 
-        return f.softmax(actions, dim=1)
+        return actions
 
 
 class Agent:
@@ -128,10 +128,10 @@ class Agent:
 
             for i in range(6):
                 if disallowed[i] == 1:
-                    actions[i] = 0
+                    actions[i] = -9999
 
-            #action = torch.argmax(actions).item()
-            action = int(torch.multinomial(actions, 1).item())
+            action = torch.argmax(actions).item() # deterministic
+            #action = int(torch.multinomial(torch.softmax(actions, dim=0), 1).item()) # softmax
 
         else:
             p = [.20, .20, .20, .20, .10, .10]
