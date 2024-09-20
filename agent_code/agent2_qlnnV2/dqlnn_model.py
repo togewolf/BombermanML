@@ -62,9 +62,8 @@ class DeepQNetwork(nn.Module):
         if train:
             x = self.dropout5(x)
         actions = self.lo(x)
-        # actions_prob = torch.sigmoid_(actions)  # todo
-        # softmax/sigmoid causes really weird errors here
-        return actions
+
+        return f.softmax(actions, dim=1)
 
 
 class Agent:
@@ -129,12 +128,10 @@ class Agent:
 
             for i in range(6):
                 if disallowed[i] == 1:
-                    actions[i] = -9999
+                    actions[i] = 0
 
-            action = torch.argmax(actions).item()
-
-            # action_probabilities = actions.clone().detach().softmax(dim=1).squeeze()  # todo
-            # action = int(torch.multinomial(action_probabilities, 1).item())
+            #action = torch.argmax(actions).item()
+            action = int(torch.multinomial(actions, 1).item())
 
         else:
             p = [.20, .20, .20, .20, .10, .10]
