@@ -15,9 +15,12 @@ DROPPED_BOMB_WHILE_ENEMY_NEAR = 'DROPPED_BOMB_WHILE_ENEMY_NEAR'
 DROPPED_BOMB_NOT_AT_CROSSING = 'DROPPED_BOMB_NOT_AT_CROSSING'  # see is_at_crossing function for the idea behind this
 DID_OPPOSITE_OF_LAST_ACTION = 'DID_OPPOSITE_OF_LAST_ACTION'  # idea: prevent oscillating back and forth
 FOLLOWED_DIRECTION_SUGGESTION = 'FOLLOWED_DIRECTION_SUGGESTION'
+DID_NOT_FOLLOW_DIRECTION_SUGGESTION = 'DID_NOT_FOLLOW_DIRECTION_SUGGESTION'
 DROPPED_BOMB_ON_TRAPPED_ENEMY = 'DROPPED_BOMB_ON_TRAPPED_ENEMY'
 DROPPED_BOMB_NEXT_TO_ENEMY = 'DROPPED_BOMB_NEXT_TO_ENEMY'
 WAITED_ON_A_BOMB = 'WAITED_ON_A_BOMB'
+ENEMY_GOT_KILL = 'ENEMY_GOT_KILL'
+WAITED_IN_EXPLOSION_ZONE = 'WAITED_IN_EXPLOSION_ZONE'
 
 
 def setup_training(self):
@@ -100,12 +103,16 @@ def game_events_occurred(self, old_game_state: dict, self_action: str, new_game_
 
     if self.previous_action == 'BOMB' and self_action == 'WAIT':
         events.append(WAITED_ON_A_BOMB)
+    elif self_action == 'WAIT' and old_features[2]:
+        events.append(WAITED_IN_EXPLOSION_ZONE)
 
     if new_features[3] == 1:
         events.append(IS_REPEATING_ACTIONS)
 
     if followed_direction(old_features[4:8], self_action):
         events.append(FOLLOWED_DIRECTION_SUGGESTION)
+    else:
+        events.append(DID_NOT_FOLLOW_DIRECTION_SUGGESTION)
 
     if (self_action == 'UP' and self.previous_action == 'DOWN') or (
             self_action == 'DOWN' and self.previous_action == 'UP') or \
@@ -199,23 +206,25 @@ def reward_from_events(self, events: List[str]) -> int:
         e.COIN_COLLECTED: 8,
         e.KILLED_OPPONENT: 10,
         # e.KILLED_SELF: -5,  # better to kill oneself than if the enemy gets the kill
-        e.GOT_KILLED: -10,
-        e.INVALID_ACTION: -1,
-        e.OPPONENT_ELIMINATED: 4,
+        e.GOT_KILLED: -5,
+        e.INVALID_ACTION: -1,  # todo remove this, can be good (e.g. moves to same tile as enemy to block it but the enemy got to it)
+        e.OPPONENT_ELIMINATED: 1,
         e.BOMB_DROPPED: -0.5,
         e.SURVIVED_ROUND: 10,
         DROPPED_BOMB_THAT_CAN_DESTROY_CRATE_BONUS_FOR_AMOUNT: 0.75,  # reward per crate that the bomb can reach
-        DROPPED_BOMB_WHILE_ENEMY_NEAR: 3,
-        DROPPED_BOMB_NEXT_TO_ENEMY: 2,
+        DROPPED_BOMB_WHILE_ENEMY_NEAR: 2,
+        DROPPED_BOMB_NEXT_TO_ENEMY: 1,
         IS_REPEATING_ACTIONS: -0.5,
         DROPPED_BOMB_THAT_CAN_DESTROY_CRATE: 2,
         DROPPED_BOMB_NOT_AT_CROSSING: -1,
         DID_OPPOSITE_OF_LAST_ACTION: -0.2,
-        FOLLOWED_DIRECTION_SUGGESTION: 0.3,
-        WAITED_ON_A_BOMB: -1  # sometimes it is okay or necessary to do that, but usually it is best to avoid.
+        FOLLOWED_DIRECTION_SUGGESTION: 0.2,
+        DID_NOT_FOLLOW_DIRECTION_SUGGESTION: -0.2,
+        WAITED_ON_A_BOMB: -1,  # sometimes it is okay or necessary to do that, but usually it is best to avoid.
+        WAITED_IN_EXPLOSION_ZONE: -1
 
     }
-    balance_punishment = 0  # todo test whether this makes sense
+    balance_punishment = -0.1  # todo test whether this makes sense
     reward_sum = sum(game_rewards[event] for event in events if event in game_rewards) + balance_punishment
     self.logger.info(f"Awarded {reward_sum} for events {', '.join(events)}")
     return reward_sum
