@@ -24,6 +24,7 @@ def setup(self):
 
     # Metrics
     self.cumulative_reward = 0
+    self.very_bad_agent = 0.0
     self.kills = 0
     self.opponents_eliminated = 0
 

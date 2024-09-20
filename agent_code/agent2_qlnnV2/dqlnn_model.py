@@ -102,8 +102,12 @@ class Agent:
 
     def store_transition(self, features, action, reward, state_, done):
         index = self.mem_cntr % self.mem_size
+        # for i in range(8, 14):
+        #     features[i] = 0
         self.state_memory[index] = features
         if state_ is not None:
+            # for i in range(8, 14):
+            #     state_[i] = 0
             self.new_state_memory[index] = state_
         else:
             self.new_state_memory[index] = features
@@ -115,6 +119,9 @@ class Agent:
     def choose_action(self, game_state, train):
         features = state_to_features(self, game_state, self.logger)
         disallowed = features[8:14]  # Result of function of immortality  # todo: test whether removing this and instead using punishment in train makes sense
+
+        # for i in range(8, 14):
+        #     features[i] = 0
 
         if np.random.random() > self.epsilon or not train:
             state = torch.tensor([features], dtype=torch.float32).to(self.Q_eval.device)
@@ -132,9 +139,9 @@ class Agent:
         else:
             p = [.20, .20, .20, .20, .10, .10]
 
-            for i in range(6):
-                if disallowed[i] == 1:
-                    p[i] = 0
+            # for i in range(6):
+            #     if disallowed[i] == 1:
+            #         p[i] = 0
 
             total_prob = np.sum(p)
             if total_prob > 0:
