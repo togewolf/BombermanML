@@ -78,6 +78,8 @@ class Agent:
         self.batch_size = batch_size
 
         # feature-related
+        self.old_features = None
+        self.new_features = None
         self.total_coins = 0
         self.previous_scores = {}
         self.bomb_owners = {}
@@ -112,11 +114,16 @@ class Agent:
         self.mem_cntr += 1
 
     def choose_action(self, game_state, train):
-        features = state_to_features(self, game_state, self.logger)
-        disallowed = features[8:14]  # Result of function of immortality
+        if train:  # No need for old features when not training
+            if self.old_features is None:
+                self.old_features = state_to_features(self, game_state, self.logger)
+
+            self.old_features = self.new_features
+        self.new_features = state_to_features(self, game_state, self.logger)
+        disallowed = self.new_features[8:14]  # Result of function of immortality
 
         if np.random.random() > self.epsilon or not train:
-            state = torch.tensor([features], dtype=torch.float32).to(self.Q_eval.device)
+            state = torch.tensor([self.new_features], dtype=torch.float32).to(self.Q_eval.device)
             actions = self.Q_eval.forward(state, train).squeeze()
 
             for i in range(6):
@@ -182,7 +189,7 @@ class Agent:
             # self.Q_eval.scheduler.step()
             self.epsilon = self.epsilon - self.eps_dec if self.epsilon > self.eps_min else self.eps_min
 
-        self.logger.info("LR = " + str(self.Q_eval.scheduler.get_last_lr()))
+        # self.logger.info("LR = " + str(self.Q_eval.scheduler.get_last_lr()))
 
 
 # Direction Mapping: invert direction by multiplying with -1
@@ -227,21 +234,27 @@ def state_to_features(self, game_state: dict, logger) -> np.array:
     in_danger = 1 if danger_map[ax, ay] > 0 else 1
     dead_end_map, dead_end_list = get_dead_end_map(field, others_full, bombs)
 
-    blocked_tunnel_list, blocked_tunnel_map = get_dangerous_tunnels(ax, ay, field, others, bombs, dist)
+    dist_t, grad_t, _ = get_distance_map_with_temporaries(ax, ay, field, others, bombs)
+
+    # Precompute distance maps for each enemy, so we do not have to recalculate all that again
+    dist_enemies = {}
+    for enemy_pos in others:
+        ex, ey = enemy_pos
+        dist_enemies[enemy_pos], _, _ = get_distance_map_with_temporaries(ex, ey, field, [(ax, ay)], bombs)
+
+    """blocked_tunnel_list, blocked_tunnel_map = get_dangerous_tunnels(field, others, bombs, dist, dist_enemies)
     for o in others:
         blocked_tunnel_map[o] = 7
     for b in bombs:
         blocked_tunnel_map[b] = 6
     blocked_tunnel_map[ax, ay] = 8
     logger.info(blocked_tunnel_map)
-    # logger.info(blocked_tunnel_list)
-    dead_end_list.extend(blocked_tunnel_list)
-
-    dist_t, grad_t, _ = get_distance_map_with_temporaries(ax, ay, field, others, bombs)
+    logger.info(blocked_tunnel_list)
+    dead_end_list.extend(blocked_tunnel_list)"""
 
     logger.info("Nearest safe called in state to features")
     nearest_safe_t = get_nearest_safe_tile(ax, ay, danger_map, others, others_full, bombs, dist_t, grad_t, dist, in_danger,
-                                           field, False, logger)
+                                           field, dist_enemies, False, logger)
     # the t marker means that temporary objects such as bombs and agents are also considered here
 
     direction_to_enemy_in_dead_end = get_direction_to_enemy_in_dead_end(self, ax, ay, dead_end_list, dist, grad,
@@ -250,7 +263,7 @@ def state_to_features(self, game_state: dict, logger) -> np.array:
 
     blocked = function_of_immortality(self, game_state, danger_map, others, others_full, bombs, dist_t, grad_t, dist,
                                       grad, nearest_safe_t, dead_end_list,
-                                      direction_to_enemy_in_dead_end[4], logger)
+                                      direction_to_enemy_in_dead_end[4], dist_enemies, logger)
 
     enemies_distances_and_directions = get_enemies_distances_and_directions(dist, others, grad)
 
@@ -881,7 +894,7 @@ def get_danger_map(game_state):
 
 
 def function_of_immortality(self, game_state, danger_map, others, others_full, bombs, dist_t, grad_t, dist, grad,
-                            nearest_safe_t, dead_end_list, can_drop_bomb_on_trapped, logger):
+                            nearest_safe_t, dead_end_list, can_drop_bomb_on_trapped, dist_enemies, logger):
     """
     Is it over-engineered? Perhaps.
     Was it worth it? Yes
@@ -944,7 +957,7 @@ def function_of_immortality(self, game_state, danger_map, others, others_full, b
 
         # Predict the nearest safe tile if it laid a bomb
         future_nearest_safe = get_nearest_safe_tile(ax, ay, future_danger_map, others, others_full, bombs, dist_t,
-                                                    grad_t, dist, True, field, True, logger)
+                                                    grad_t, dist, True, field, dist_enemies, True, logger)
         logger.info("Predicted future nearest safe if bomb: " + str(future_nearest_safe))
 
         # Distance map ignores enemies and bombs, so we manually have to check whether something blocks that direction
@@ -957,7 +970,7 @@ def function_of_immortality(self, game_state, danger_map, others, others_full, b
 
     logger.info("Disallowed before dead end: " + str(disallowed))
 
-    dedend, is_on_tile_before = do_not_the_dead_end(ax, ay, dead_end_list, others, dist, grad, field, bombs)
+    dedend, is_on_tile_before = do_not_the_dead_end(ax, ay, dead_end_list, others, dist, grad, dist_enemies)
     logger.info("Result of do not the dead end function: " + str(dedend))
     # Prevent it from entering dead end if dangerous, but allow it to enter dead end as a last resort
     if not all(d or d_ded for d, d_ded in zip(disallowed[0:4], dedend)):
@@ -982,12 +995,13 @@ def function_of_immortality(self, game_state, danger_map, others, others_full, b
 
     logger.info("Disallowed4: " + str(disallowed))
 
+    if current_danger == 4:
+        disallowed[4] = 1  # Do not wait when a bomb explodes in the next step - fixes a bug
+
     if all(disallowed):  # Should only happen if the agent now dies certainly, or if there is an error in this function
         disallowed = [0] * 6
 
     # One last pass du disallow obviously invalid actions that might have been re-allowed earlier in this function
-    if current_danger == 3:
-        disallowed[4] = 1  # Do not wait when a bomb explodes in the next step - fixes a bug
     for i, d in enumerate(directions):
         if danger_map[d] == 4 or field[d] != 0 or d in bombs:
             disallowed[i] = 1
@@ -1007,7 +1021,7 @@ def function_of_immortality(self, game_state, danger_map, others, others_full, b
     return disallowed
 
 
-def path_can_be_blocked_by_enemy(ax, ay, dist_agent, safe_positions, others, field, predict=False):
+def path_can_be_blocked_by_enemy(dist_agent, safe_positions, others, dist_enemies, predict=False):
     """
     For every enemy, use get_distance_map(ax, ay, field) to get their distance map
     and then check for every one of the safe tiles whether dist_enemy[tile] > dist_agent[tile]
@@ -1022,7 +1036,7 @@ def path_can_be_blocked_by_enemy(ax, ay, dist_agent, safe_positions, others, fie
             # the distance of the enemy to the other tiles next to the agent is not two, which would
             # prevent the agent from dropping a bomb since with dist_enemy_to_safe -= 1 the enemy would
             # have the same distance to those tiles
-            dist_enemy, _, _ = get_distance_map_with_temporaries(ex, ey, field, [(ax, ay)], [])
+            dist_enemy = dist_enemies[(ex, ey)]  # Use precomputed distance map
 
             for i, safe_pos in enumerate(safe_positions):
                 dist_agent_to_safe = dist_agent[safe_pos]
@@ -1038,7 +1052,7 @@ def path_can_be_blocked_by_enemy(ax, ay, dist_agent, safe_positions, others, fie
 
 
 def get_nearest_safe_tile(ax, ay, danger_map, others, others_full, bombs, dist_t, grad_t, dist, in_danger, field,
-                          predict, logger, prev_distances=None, danger=False):
+                          dist_enemies, predict, logger, prev_distances=None, danger=False):
     """Idea: when an agent finds itself in the explosion radius of a bomb, this should point the agent
     in the direction of the nearest safe tile, especially useful for avoiding placing a bomb and then
     walking in a dead end waiting for the bomb to blow up. Should also work for escaping enemy bombs.
@@ -1119,7 +1133,7 @@ def get_nearest_safe_tile(ax, ay, danger_map, others, others_full, bombs, dist_t
             return False
         else:
             if dist_t[x, y] < 5 and (x, y) not in others and (x, y) not in bombs \
-                    and (danger_map[x, y] < danger_map[ax, ay] or dist[x, y] > 2 and danger_map[x, y] == 4) \
+                    and (danger_map[x, y] < danger_map[ax, ay] or (dist[x, y] > 2 and danger_map[x, y] == 4)) \
                     and not is_dead_end(x, y):
                 return True
             return False
@@ -1131,7 +1145,7 @@ def get_nearest_safe_tile(ax, ay, danger_map, others, others_full, bombs, dist_t
 
     if not danger:
         # Remove tiles that could be reached by an enemy
-        all_safe_tiles = path_can_be_blocked_by_enemy(ax, ay, dist, all_safe_tiles, others, field, predict)
+        all_safe_tiles = path_can_be_blocked_by_enemy(dist, all_safe_tiles, others, dist_enemies, predict)
 
     for safe_tile in all_safe_tiles:
         # Enter the distance to the tile in the correct direction
@@ -1186,7 +1200,7 @@ def get_nearest_safe_tile(ax, ay, danger_map, others, others_full, bombs, dist_t
 
     if all(d > 5 - danger_map[ax, ay] for d in distances) and not predict and not danger:
         distances = get_nearest_safe_tile(ax, ay, danger_map, others, others_full, bombs, dist_t, grad_t, dist,
-                                          in_danger, field, predict, logger, prev_distances=distances, danger=True)
+                                          in_danger, field, dist_enemies, predict, logger, prev_distances=distances, danger=True)
         logger.info("Nearest safe tile function had to do second pass: " + str(distances))
         return distances
 
@@ -1349,7 +1363,7 @@ def get_direction_to_enemy_in_dead_end(self, ax, ay, dead_end_list, dist, grad, 
     return one_hot_direction
 
 
-def do_not_the_dead_end(ax, ay, dead_end_list, others, dist, grad, field, bombs):
+def do_not_the_dead_end(ax, ay, dead_end_list, others, dist, grad, dist_enemies):
     """
     Do not enter a dead end if an enemy is nearby and not inside the same dead end.
     Also, leave the dead end immediately if otherwise an enemy could reach the exit faster than you.
@@ -1380,7 +1394,7 @@ def do_not_the_dead_end(ax, ay, dead_end_list, others, dist, grad, field, bombs)
     # Find the nearest enemy and check the condition
     nearest_enemy = min(nearby_enemies, key=lambda e: dist[e])  # Find the nearest enemy
     # nearest_enemy_distance = dist[nearest_enemy]  # Distance to the nearest enemy
-    dist_enemy, _, _ = get_distance_map_with_temporaries(nearest_enemy[0], nearest_enemy[1], field, [], bombs)
+    dist_enemy = dist_enemies[nearest_enemy]
     # Distance from agent to the 'tile_before_open_end'
     distance_to_exit = dist[current_dead_end['tile_before_open_end']]
     distance_to_exit_enemy = dist_enemy[current_dead_end['tile_before_open_end']]
@@ -1409,9 +1423,9 @@ def do_not_the_dead_end(ax, ay, dead_end_list, others, dist, grad, field, bombs)
     return one_hot_direction, is_on_tile_before
 
 
-def get_dangerous_tunnels(ax, ay, field, others, bombs, dist):
+def get_dangerous_tunnels(field, others, bombs, dist, dist_enemies):
     """
-    todo get this to work
+    todo: fix issues, does not work properly
     Returns a tunnel map and adds tunnels of length 7 or less that can be blocked by enemies to the dead end list.
     A tunnel is a sequence of tiles with exactly 2 open neighbors, one at each end.
     A tunnel of length 1 (just two walls with a gap in the middle) also counts.
@@ -1480,12 +1494,12 @@ def get_dangerous_tunnels(ax, ay, field, others, bombs, dist):
                         if dist[end_tile] < dist[other_end]:
                             tile_before_open_end = end_tile
                             tile_before_far_end = other_end
-                            open_end = tunnel_path[0]  # todo maybe 1
+                            open_end = tunnel_path[1]  # todo something isn't right here
                             far_end = tunnel_path[-1]
                         else:
                             tile_before_open_end = other_end
                             tile_before_far_end = end_tile
-                            open_end = tunnel_path[-1]
+                            open_end = tunnel_path[-2]
                             far_end = tunnel_path[0]
 
                         tunnel_list.append({
@@ -1511,7 +1525,7 @@ def get_dangerous_tunnels(ax, ay, field, others, bombs, dist):
     for o in others:
         if dist[o] < 10:
             ex, ey = o
-            dist_enemy, _, _ = get_distance_map_with_temporaries(ex, ey, field, [(ax, ay)], [])
+            dist_enemy = dist_enemies[(ex, ey)]   # Use precomputed distance map for this enemy
 
             for tunnel in tunnel_list:
                 tile_before_far_end = tunnel['tile_before_far_end']

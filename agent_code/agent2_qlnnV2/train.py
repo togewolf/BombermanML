@@ -71,11 +71,11 @@ def game_events_occurred(self, old_game_state: dict, self_action: str, new_game_
     :param events: The events that occurred when going from  `old_game_state` to `new_game_state`
     """
     self.logger.debug(f'Encountered game event(s) {", ".join(map(repr, events))} in step {new_game_state["step"]}')
-    if not old_game_state:
+    if not old_game_state or self.model.old_features is None or self.model.new_features is None:
         return
 
-    old_features = state_to_features(self.model, old_game_state, self.logger)
-    new_features = state_to_features(self.model, new_game_state, self.logger)
+    old_features = self.model.old_features
+    new_features = self.model.new_features
 
     crate_count = old_features[1]
 
@@ -145,8 +145,6 @@ def game_events_occurred(self, old_game_state: dict, self_action: str, new_game_
             events.append(IGNORED_ENEMY_IN_DEAD_END)
 
     self.previous_action = self_action
-
-    self.logger.info("Disallowed actions: " + str(new_features[8:14]))
 
     reward = reward_from_events(self, events)
     self.cumulative_reward += reward

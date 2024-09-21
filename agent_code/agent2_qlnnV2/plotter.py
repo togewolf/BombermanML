@@ -10,9 +10,6 @@ def plot_scores_and_survival(score_file, survival_file, miny_score, maxy_score, 
     scores = pd.read_csv(score_file)
     survival = pd.read_csv(survival_file)
 
-    if len(scores) % 50 == 0 and scores > 100:
-        print("Mean score after round 100 in round " + str(len(scores)) + ":" + str(np.mean(scores[100:])))
-
     scores_smooth = scores.rolling(window=smoothing_window).mean()
     survival_smooth = survival.rolling(window=smoothing_window).mean()
 
