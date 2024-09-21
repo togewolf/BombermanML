@@ -1,5 +1,5 @@
 import os
-import pickle
+import torch
 from .dqlnn_model import Agent
 from .utils import Action
 
@@ -24,6 +24,7 @@ def setup(self):
 
     # Metrics
     self.cumulative_reward = 0
+    self.very_bad_agent = 0.0
     self.kills = 0
     self.opponents_eliminated = 0
 
@@ -35,8 +36,11 @@ def setup(self):
 
     else:
         self.logger.info("Loading model from saved state.")
-        with open(model_filename, 'rb') as file:
-            self.model = pickle.load(file)
+        device = torch.device('cuda:0' if torch.cuda.is_available() else 'cpu')
+        if not torch.cuda.is_available():
+            self.logger.info("GPU not found!")
+        self.model = torch.load(model_filename, map_location=device)
+        self.model.Q_eval.device = device
 
 
 def act(self, game_state: dict) -> str:

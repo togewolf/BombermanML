@@ -15,16 +15,9 @@ DROPPED_BOMB_WHILE_ENEMY_NEAR = 'DROPPED_BOMB_WHILE_ENEMY_NEAR'
 DROPPED_BOMB_NOT_AT_CROSSING = 'DROPPED_BOMB_NOT_AT_CROSSING'  # see is_at_crossing function for the idea behind this
 DID_OPPOSITE_OF_LAST_ACTION = 'DID_OPPOSITE_OF_LAST_ACTION'  # idea: prevent oscillating back and forth
 FOLLOWED_DIRECTION_SUGGESTION = 'FOLLOWED_DIRECTION_SUGGESTION'
-DID_NOT_FOLLOW_DIRECTION_SUGGESTION = 'DID_NOT_FOLLOW_DIRECTION_SUGGESTION'  # so it does not oscillate to gain reward
 DROPPED_BOMB_ON_TRAPPED_ENEMY = 'DROPPED_BOMB_ON_TRAPPED_ENEMY'
 DROPPED_BOMB_NEXT_TO_ENEMY = 'DROPPED_BOMB_NEXT_TO_ENEMY'
 WAITED_ON_A_BOMB = 'WAITED_ON_A_BOMB'
-ENEMY_GOT_KILL = 'ENEMY_GOT_KILL'
-WAITED_IN_EXPLOSION_ZONE = 'WAITED_IN_EXPLOSION_ZONE'
-IS_NEAR_BORDER = 'IS_NEAR_BORDER'
-MOVED_TOWARD_ENEMY_IN_DEAD_END = 'MOVED_TOWARD_ENEMY_IN_DEAD_END'
-IGNORED_ENEMY_IN_DEAD_END = 'IGNORED_ENEMY_IN_DEAD_END'  # so it does not oscillate near trapped enemy to gain reward
-IS_NEXT_TO_ENEMY = 'IS_NEXT_TO_ENEMY'
 
 
 def setup_training(self):
@@ -104,28 +97,15 @@ def game_events_occurred(self, old_game_state: dict, self_action: str, new_game_
 
         if old_features[27] == 1:
             events.append(DROPPED_BOMB_ON_TRAPPED_ENEMY)
-    else:
-        if old_features[28] == 1:
-            events.append(IS_NEXT_TO_ENEMY)  # without dropping a bomb
 
     if self.previous_action == 'BOMB' and self_action == 'WAIT':
         events.append(WAITED_ON_A_BOMB)
-    elif self_action == 'WAIT' and old_features[2]:
-        events.append(WAITED_IN_EXPLOSION_ZONE)
 
     if new_features[3] == 1:
         events.append(IS_REPEATING_ACTIONS)
 
     if followed_direction(old_features[4:8], self_action):
         events.append(FOLLOWED_DIRECTION_SUGGESTION)
-    else:
-        events.append(DID_NOT_FOLLOW_DIRECTION_SUGGESTION)
-
-    _, _, _, (ax, ay) = new_game_state['self']
-    if ax < 3 or ax > 14:
-        events.append(IS_NEAR_BORDER)
-    if ay < 3 or ay > 14:
-        events.append(IS_NEAR_BORDER)  # Twice so it is punished extra for being in corners
 
     if (self_action == 'UP' and self.previous_action == 'DOWN') or (
             self_action == 'DOWN' and self.previous_action == 'UP') or \
@@ -145,9 +125,6 @@ def game_events_occurred(self, old_game_state: dict, self_action: str, new_game_
         self.kills += 1
     if e.OPPONENT_ELIMINATED in events:
         self.opponents_eliminated += 1
-
-    if followed_direction(old_features[52:56], self_action):
-        events.append(MOVED_TOWARD_ENEMY_IN_DEAD_END)
 
     self.model.store_transition(old_features, Action.from_str(self_action),
                                 reward, new_features, done=False)
@@ -219,29 +196,24 @@ def reward_from_events(self, events: List[str]) -> int:
         e.MOVED_LEFT: -0.1,
         e.MOVED_RIGHT: -0.1,
         e.WAITED: -0.3,
-        e.COIN_COLLECTED: 10,
+        e.COIN_COLLECTED: 8,
         e.KILLED_OPPONENT: 10,
         # e.KILLED_SELF: -5,  # better to kill oneself than if the enemy gets the kill
-        e.GOT_KILLED: -15,
-        e.INVALID_ACTION: -1.5,  # usually happens before death
-        e.OPPONENT_ELIMINATED: 2,
+        e.GOT_KILLED: -10,
+        e.INVALID_ACTION: -1,
+        e.OPPONENT_ELIMINATED: 4,
         e.BOMB_DROPPED: -0.5,
         e.SURVIVED_ROUND: 10,
-        DROPPED_BOMB_THAT_CAN_DESTROY_CRATE_BONUS_FOR_AMOUNT: 1,  # reward per crate that the bomb can reach
-        DROPPED_BOMB_WHILE_ENEMY_NEAR: 2,
-        DROPPED_BOMB_NEXT_TO_ENEMY: 1,
+        DROPPED_BOMB_THAT_CAN_DESTROY_CRATE_BONUS_FOR_AMOUNT: 0.75,  # reward per crate that the bomb can reach
+        DROPPED_BOMB_WHILE_ENEMY_NEAR: 3,
+        DROPPED_BOMB_NEXT_TO_ENEMY: 2,
         IS_REPEATING_ACTIONS: -0.5,
         DROPPED_BOMB_THAT_CAN_DESTROY_CRATE: 2,
         DROPPED_BOMB_NOT_AT_CROSSING: -1,
         DID_OPPOSITE_OF_LAST_ACTION: -0.2,
         FOLLOWED_DIRECTION_SUGGESTION: 0.3,
-        DID_NOT_FOLLOW_DIRECTION_SUGGESTION: -0.1,
-        WAITED_ON_A_BOMB: -1,  # sometimes it is okay or necessary to do that, but usually it is best to avoid.
-        WAITED_IN_EXPLOSION_ZONE: -1,
-        IS_NEAR_BORDER: -0.1,
-        MOVED_TOWARD_ENEMY_IN_DEAD_END: 0.7,
-        IGNORED_ENEMY_IN_DEAD_END: -0.3,
-        IS_NEXT_TO_ENEMY: -0.5
+        WAITED_ON_A_BOMB: -1  # sometimes it is okay or necessary to do that, but usually it is best to avoid.
+
     }
     balance_punishment = 0  # todo test whether this makes sense
     reward_sum = sum(game_rewards[event] for event in events if event in game_rewards) + balance_punishment

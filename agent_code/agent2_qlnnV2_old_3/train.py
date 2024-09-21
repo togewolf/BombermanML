@@ -1,4 +1,6 @@
-import pickle
+from copy import deepcopy
+
+import torch
 from typing import List
 import os
 import csv  # to store scores
@@ -26,7 +28,7 @@ def setup_training(self):
     This is called after `setup` in callbacks.py.
     :param self: This object is passed to all callbacks, and you can set arbitrary values.
     """
-    self.save_frequency = 25  # store a snapshot every n rounds
+    self.save_frequency = 100  # store a snapshot every n rounds
     self.previous_action = 'WAIT'
 
 
@@ -148,8 +150,15 @@ def end_of_round(self, last_game_state: dict, last_action: str, events: List[str
     # Save snapshot of the model
     os.makedirs('model/snapshots', exist_ok=True)
     if self.model.epoch % self.save_frequency == 0:
-        with open('model/snapshots/model-' + str(self.model.epoch) + '.pt', 'wb') as file:
-            pickle.dump(self.model, file)
+        pure_model = deepcopy(self.model)
+
+        pure_model.state_memory = None
+        pure_model.new_state_memory = None
+        pure_model.action_memory = None
+        pure_model.reward_memory = None
+        pure_model.terminal_memory = None
+
+        torch.save(pure_model, 'model/snapshots/model-' + str(pure_model.epoch) + '.pt')
 
     # Gather metrics for the round
     score = last_game_state['self'][1]
@@ -182,8 +191,7 @@ def end_of_round(self, last_game_state: dict, last_action: str, events: List[str
         writer.writerow([survived])
 
     # Store the model
-    with open('model/model.pt', 'wb') as file:
-        pickle.dump(self.model, file)
+    torch.save(self.model, 'model/model.pt')
 
 
 def reward_from_events(self, events: List[str]) -> int:
