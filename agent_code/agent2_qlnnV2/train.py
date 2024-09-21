@@ -234,21 +234,21 @@ def reward_from_events(self, events: List[str]) -> int:
         e.OPPONENT_ELIMINATED: 2,
         e.BOMB_DROPPED: -0.5,
         e.SURVIVED_ROUND: 10,
-        DROPPED_BOMB_THAT_CAN_DESTROY_CRATE_BONUS_FOR_AMOUNT: 1,  # Reward per crate that the bomb can reach
-        DROPPED_BOMB_WHILE_ENEMY_NEAR: 2,
+        DROPPED_BOMB_THAT_CAN_DESTROY_CRATE_BONUS_FOR_AMOUNT: 0.5,  # Reward per crate that the bomb can reach
+        DROPPED_BOMB_WHILE_ENEMY_NEAR: 1,
         DROPPED_BOMB_NEXT_TO_ENEMY: 1,
         IS_REPEATING_ACTIONS: -0.5,
-        DROPPED_BOMB_THAT_CAN_DESTROY_CRATE: 2,
-        DROPPED_BOMB_NOT_AT_CROSSING: -1,
+        DROPPED_BOMB_THAT_CAN_DESTROY_CRATE: 1,
+        DROPPED_BOMB_NOT_AT_CROSSING: -0.75,
         DID_OPPOSITE_OF_LAST_ACTION: -0.2,
         FOLLOWED_DIRECTION_SUGGESTION: 0.3,
         DID_NOT_FOLLOW_DIRECTION_SUGGESTION: -0.1,
         WAITED_ON_A_BOMB: -1,  # Sometimes it is okay or necessary to do that, but usually it is best to avoid.
-        WAITED_IN_EXPLOSION_ZONE: -1,
+        WAITED_IN_EXPLOSION_ZONE: -0.3,
         IS_NEAR_BORDER: -0.1,
         MOVED_TOWARD_ENEMY_IN_DEAD_END: 0.7,
         IGNORED_ENEMY_IN_DEAD_END: -0.3,
-        IS_NEXT_TO_ENEMY: -0.5
+        IS_NEXT_TO_ENEMY: -0.3
     }
     # If the overall rewards are too high, the agent has too little incentive to end the game quickly and becomes 'lazy'
     # If the overall rewards are too low/negative, it will learn to die as soon as possible
