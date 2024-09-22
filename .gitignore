@@ -116,3 +116,8 @@ model/
 
 # not working?
 .idea/
+/agent_code/agent2_qlnnV2_old_7/
+/agent_code/agent2_qlnnV2_old_6/
+/agent_code/agent2_qlnnV2_old_5/
+/agent_code/agent2_qlnnV2_old_3/
+/agent_code/agent2_qlnn/

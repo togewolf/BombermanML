@@ -5,7 +5,7 @@ import os
 import csv  # to store scores
 
 import events as e
-from .dqlnn_model import state_to_features
+from .dqlnn_agent import state_to_features
 from .utils import Action
 
 # Events
@@ -234,16 +234,16 @@ def reward_from_events(self, events: List[str]) -> int:
         e.COIN_COLLECTED: 8,
         e.KILLED_OPPONENT: 10,
         # e.KILLED_SELF: -5,  # Better to kill oneself than if the enemy gets the kill
-        e.GOT_KILLED: -15,
+        e.GOT_KILLED: -10,
         e.INVALID_ACTION: -1.5,  # Usually happens before death
         e.OPPONENT_ELIMINATED: 4,  # Helps the agent make other agents kill themselves, balances ENEMY_GOT_KILL
         e.BOMB_DROPPED: -0.75,
         e.SURVIVED_ROUND: 10,
-        DROPPED_BOMB_THAT_CAN_DESTROY_CRATE_BONUS_FOR_AMOUNT: 0.75,  # Bonus reward per crate that the bomb can reach
+        DROPPED_BOMB_THAT_CAN_DESTROY_CRATE_BONUS_FOR_AMOUNT: 0.5,  # Bonus reward per crate that the bomb can reach
         DROPPED_BOMB_WHILE_ENEMY_NEAR: 1,
-        DROPPED_BOMB_NEXT_TO_ENEMY: 1,
+        DROPPED_BOMB_NEXT_TO_ENEMY: 1.5,
         IS_REPEATING_ACTIONS: -0.5,
-        DROPPED_BOMB_THAT_CAN_DESTROY_CRATE: 1,
+        DROPPED_BOMB_THAT_CAN_DESTROY_CRATE: 1.5,
         DROPPED_BOMB_NOT_AT_CROSSING: -0.5,
         DID_OPPOSITE_OF_LAST_ACTION: -0.2,
         FOLLOWED_DIRECTION_SUGGESTION: 0.3,

@@ -1,6 +1,6 @@
 import os
 import torch
-from .dqlnn_model import Agent
+from .dqlnn_agent import Agent
 from .utils import Action
 
 
@@ -41,6 +41,7 @@ def setup(self):
             self.logger.info("GPU not found!")
         self.model = torch.load(model_filename, map_location=device)
         self.model.Q_eval.device = device
+        self.model.logger = self.logger
 
 
 def act(self, game_state: dict) -> str:
