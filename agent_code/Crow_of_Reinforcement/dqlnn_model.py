@@ -254,9 +254,9 @@ def state_to_features(self, game_state: dict, logger) -> np.array:
 
     logger.info("Nearest safe called in state to features")
     logger.info("In danger: " + str(in_danger))
-    nearest_safe_t = get_nearest_safe_tile(ax, ay, danger_map, others, others_full, bombs, dist_t, grad_t, dist,
-                                           in_danger,
-                                           field, dist_enemies, False, logger)
+    nearest_safe_t = get_safe_tile_distances(ax, ay, danger_map, others, others_full, bombs, dist_t, grad_t, dist,
+                                             in_danger,
+                                             field, dist_enemies, False, logger)
     # the t marker means that temporary objects such as bombs and agents are also considered here
 
     direction_to_enemy_in_dead_end = get_direction_to_enemy_in_dead_end(self, ax, ay, dead_end_list, dist, grad,
@@ -293,7 +293,7 @@ def state_to_features(self, game_state: dict, logger) -> np.array:
     features.extend(get_enemies_relative_positions(ax, ay, others))  # 38-49
     features.extend([0.1 * ax, 0.1 * ay])  # 50-51  Idea: learn to avoid dwelling at the borders and the corners
     features.extend(direction_to_enemy_in_dead_end[:4])  # 52-55
-    features.extend(get_second_nearest_coin_dist(dist, coins, grad))  # 56-60
+    features.extend(get_second_nearest_coin_dist(dist, coins, grad))  # 56-59
     # relative bomb positions?
 
     return features
@@ -304,8 +304,7 @@ def direction_suggestion(ax, ay, danger_map, bombs, enemies, field, coins, crate
     """
     Selects a goal tile: trappable enemy, coin, escape direction, crate, enemy in order of decreasing importance.
     The agent is rewarded for following the directions, but not forced.
-    Returns a one-hot direction vector and a bool, whether it can drop a bomb on a trapped enemy,
-    which is used as a separate feature.
+    Returns a one-hot direction vector.
     """
     suggestion = [0] * 4
 
@@ -899,7 +898,7 @@ def function_of_immortality(self, game_state, danger_map, others, others_full, b
                             nearest_safe_t, dead_end_list, can_drop_bomb_on_trapped, dist_enemies, logger):
     """
     Is it over-engineered? Perhaps.
-    Was it worth it? Yes
+    Was it worth it? Yes.
 
     Returns a binary vector of length six, each bit signifying whether that action is "allowed" (0) or "disallowed" (1).
     This function is directly used to prohibit the disallowed actions in the choose_action function,
@@ -958,8 +957,8 @@ def function_of_immortality(self, game_state, danger_map, others, others_full, b
                     break
 
         # Predict the nearest safe tile if it laid a bomb
-        future_nearest_safe = get_nearest_safe_tile(ax, ay, future_danger_map, others, others_full, bombs, dist_t,
-                                                    grad_t, dist, True, field, dist_enemies, True, logger)
+        future_nearest_safe = get_safe_tile_distances(ax, ay, future_danger_map, others, others_full, bombs, dist_t,
+                                                      grad_t, dist, True, field, dist_enemies, True, logger)
         logger.info("Predicted future nearest safe if bomb: " + str(future_nearest_safe))
 
         # Distance map ignores enemies and bombs, so we manually have to check whether something blocks that direction
@@ -1053,8 +1052,8 @@ def path_can_be_blocked_by_enemy(dist_agent, safe_positions, others, dist_enemie
     return [tuple(pos) for pos in np.array(safe_positions)[safe_mask]]  # [(a,b), (c,d), ...]
 
 
-def get_nearest_safe_tile(ax, ay, danger_map, others, others_full, bombs, dist_t, grad_t, dist, in_danger, field,
-                          dist_enemies, predict, logger, prev_distances=None, danger=False):
+def get_safe_tile_distances(ax, ay, danger_map, others, others_full, bombs, dist_t, grad_t, dist, in_danger, field,
+                            dist_enemies, predict, logger, prev_distances=None, danger=False):
     """Idea: when an agent finds itself in the explosion radius of a bomb, this should point the agent
     in the direction of the nearest safe tile, especially useful for avoiding placing a bomb and then
     walking in a dead end waiting for the bomb to blow up. Should also work for escaping enemy bombs.
@@ -1201,9 +1200,9 @@ def get_nearest_safe_tile(ax, ay, danger_map, others, others_full, bombs, dist_t
     logger.info("Nearest safe: " + str(distances) + " Current Danger: " + str(danger_map[ax, ay]))
 
     if all(d > 5 - danger_map[ax, ay] for d in distances) and not predict and not danger:
-        distances = get_nearest_safe_tile(ax, ay, danger_map, others, others_full, bombs, dist_t, grad_t, dist,
-                                          in_danger, field, dist_enemies, predict, logger, prev_distances=distances,
-                                          danger=True)
+        distances = get_safe_tile_distances(ax, ay, danger_map, others, others_full, bombs, dist_t, grad_t, dist,
+                                            in_danger, field, dist_enemies, predict, logger, prev_distances=distances,
+                                            danger=True)
         logger.info("Nearest safe tile function had to do second pass: " + str(distances))
         return distances
 
@@ -1561,40 +1560,17 @@ def neighboring_tile_conflict(ax, ay, others):
 
 # todo:
 """
-- After step 300, if cannot kill current opponent after 7 bombs, change current goal to other opponent
+- After step 250, if cannot kill current opponent after 7 bombs, change current goal to other opponent
 - increase agent kill rate, make it more aggressive somehow -> train against worse agents?
 - prioritizing attacking 'weak' enemies - there will be teams with bad implementations we could farm points off of
     example: agent does not move -> keep location history of other agents and move toward "braindead" agents
 
 
 
-Test Runs:
-01 loot crate base: 2*V2+2*RB, loot_crate, 100 rounds
-02 standard base: 2*V2+2*RB, 100 rounds
-03 long training: 2*V2+2*RB, 300 rounds -> no visible improvement
-04 more layers: 2*V2+2*RB, 200 rounds, 128/128/64/.../64/6 (10 Layer) -> no visible improvement
-05 against itself: 4*V2, 150 rounds, then 150 rounds against rule_based, less layers again -> after switching to rule_based no visible improvement
-06 less layers: 2*V2+2*RB, 150 rounds, 128/128/6 -> seems just as good
-07 smaller less layers: 2*V2+2*RB, 150 rounds, 32/32/6 -> also similar performance after enough time?
-08 even smaller layers: 2*V2+2*RB, 150 rounds, 8/8/6 -> much worse performance
-09 try midsize: 2*V2+2*RB, 150 rounds, 16/16/6 -> also not se yellow from se egg: 32 width seems necessary
-10 very deeeeep: 2*V2+2*RB, 150 rounds, 8/8/8/8/8/6 -> does depth change anything? no
-11 train loot crate base on standard scenario: 2*V2+2*RB, 150 rounds in loot crate, 150 rounds in standard -> no visible improvement
-
-
-Scientific investigations:
-
-try significantly increasing the batch size. Result: 100% cpu usage an noisy computer, results are not better
-
-experiment: add many layers and see what happens
 
 Why exactly does performance decrease after some amount of training steps? Why the periodic ups and downs?
 
-Networks with layer sizes decreasing from input to output appear to be better. Investigate. 
-
-Test our agent against others from github in 2 vs 2 and record avg scores
-
 LSTM cells, e.g. can remember spots where the bomb could destroy many crates
 
-Experiment: only rewards: coins 1, enemies 5 -> should learn to ma ximize score
+Experiment: only rewards: coins 1, enemies 5 -> should learn to maximize score
 """
