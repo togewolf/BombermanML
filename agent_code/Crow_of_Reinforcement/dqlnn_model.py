@@ -866,7 +866,7 @@ def get_neighboring_explosions_or_coins(ax, ay, danger_map, coins):
 
 def get_danger_map(game_state):
     """
-    Returns maps with danger levels: 0 for no danger, 4 for active explosions.
+    Returns map with danger levels: 0 for no danger, 4 for active explosions.
     For each tile in bomb radius: danger = 4 - countdown
     -> it is 4 when the bomb explodes in the next step
     """
@@ -1401,7 +1401,7 @@ def do_not_the_dead_end(ax, ay, dead_end_list, others, dist, grad, dist_enemies)
     distance_to_exit = dist[current_dead_end['tile_before_open_end']]
     distance_to_exit_enemy = dist_enemy[current_dead_end['tile_before_open_end']]
 
-    # If the agent cannot reach the exit in time
+    # If the agent would reach the exit in time if it remained in the dead end
     if distance_to_exit + 1 >= distance_to_exit_enemy:
         # Use the get_direction_to_object to find the direction toward the exit
         direction = get_direction_to_object(current_dead_end['tile_before_open_end'], grad)

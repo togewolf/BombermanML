@@ -218,7 +218,7 @@ def end_of_round(self, last_game_state: dict, last_action: str, events: List[str
         writer.writerow([survived])
 
     # Store the model
-    torch.save(self.model, 'model/model_3x50.pt')
+    torch.save(self.model, 'model/model.pt')
 
 
 def reward_from_events(self, events: List[str]) -> int:
