@@ -1,6 +1,6 @@
 import os
 import torch
-from .dqlnn_agent import Agent
+from .dqlnn_model import Agent
 from .utils import Action
 
 

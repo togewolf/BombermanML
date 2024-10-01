@@ -2,7 +2,7 @@ import json
 import pandas as pd
 import matplotlib.pyplot as plt
 
-with open('results/thomas_vs_crow.json', 'r') as file:
+with open('results/human2.json', 'r') as file:
     data = json.load(file)
 
 df = pd.DataFrame(data['by_agent']).T

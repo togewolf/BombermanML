@@ -25,6 +25,7 @@ IS_NEAR_BORDER = 'IS_NEAR_BORDER'
 MOVED_TOWARD_ENEMY_IN_DEAD_END = 'MOVED_TOWARD_ENEMY_IN_DEAD_END'
 IGNORED_ENEMY_IN_DEAD_END = 'IGNORED_ENEMY_IN_DEAD_END'  # so it does not oscillate near trapped enemy to gain reward
 IS_NEXT_TO_ENEMY = 'IS_NEXT_TO_ENEMY'
+MOVED_TOWARD_CENTRE = 'MOVED_TOWARD_CENTRE'  # It is advantageous to be near the centre of the map
 
 
 def setup_training(self):
@@ -227,7 +228,7 @@ def reward_from_events(self, events: List[str]) -> int:
         e.OPPONENT_ELIMINATED: 2,
         e.BOMB_DROPPED: -0.5,
         e.SURVIVED_ROUND: 10,
-        DROPPED_BOMB_THAT_CAN_DESTROY_CRATE_BONUS_FOR_AMOUNT: 1,  # reward per crate that the bomb can reach
+        DROPPED_BOMB_THAT_CAN_DESTROY_CRATE_BONUS_FOR_AMOUNT: 0.5,  # reward per crate that the bomb can reach
         DROPPED_BOMB_WHILE_ENEMY_NEAR: 2,
         DROPPED_BOMB_NEXT_TO_ENEMY: 1,
         IS_REPEATING_ACTIONS: -0.5,

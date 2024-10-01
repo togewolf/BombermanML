@@ -2,8 +2,8 @@ import torch
 import torch.nn as nn
 import torch.optim as optim
 import torch.optim.lr_scheduler as scheduler
-import numpy as np
 import torch.nn.functional as f
+import numpy as np
 from collections import deque
 import random
 from heapq import heapify, heappop, heappush
@@ -66,7 +66,7 @@ class DeepQNetwork(nn.Module):
 
 
 class Agent:
-    def __init__(self, logger, gamma, epsilon, lr, input_dims, batch_size, max_mem_size=100000, eps_end=0.03,
+    def __init__(self, logger, gamma, epsilon, lr, input_dims, batch_size, max_mem_size=100000, eps_end=0.05,
                  eps_dec=1e-2):
         self.logger = logger
         self.gamma = gamma
@@ -231,7 +231,7 @@ def state_to_features(self, game_state: dict, logger) -> np.array:
     others = [t[3] for t in others_full]
     dist, grad, crate_map = get_distance_map(ax, ay, field)
     danger_map = get_danger_map(game_state)
-    in_danger = 1 if danger_map[ax, ay] > 0 else 1
+    in_danger = 1 if danger_map[ax, ay] > 0 else 0
     dead_end_map, dead_end_list = get_dead_end_map(field, others_full, bombs)
 
     dist_t, grad_t, _ = get_distance_map_with_temporaries(ax, ay, field, others, bombs)
@@ -253,7 +253,9 @@ def state_to_features(self, game_state: dict, logger) -> np.array:
     dead_end_list.extend(blocked_tunnel_list)"""
 
     logger.info("Nearest safe called in state to features")
-    nearest_safe_t = get_nearest_safe_tile(ax, ay, danger_map, others, others_full, bombs, dist_t, grad_t, dist, in_danger,
+    logger.info("In danger: " + str(in_danger))
+    nearest_safe_t = get_nearest_safe_tile(ax, ay, danger_map, others, others_full, bombs, dist_t, grad_t, dist,
+                                           in_danger,
                                            field, dist_enemies, False, logger)
     # the t marker means that temporary objects such as bombs and agents are also considered here
 
@@ -1200,7 +1202,8 @@ def get_nearest_safe_tile(ax, ay, danger_map, others, others_full, bombs, dist_t
 
     if all(d > 5 - danger_map[ax, ay] for d in distances) and not predict and not danger:
         distances = get_nearest_safe_tile(ax, ay, danger_map, others, others_full, bombs, dist_t, grad_t, dist,
-                                          in_danger, field, dist_enemies, predict, logger, prev_distances=distances, danger=True)
+                                          in_danger, field, dist_enemies, predict, logger, prev_distances=distances,
+                                          danger=True)
         logger.info("Nearest safe tile function had to do second pass: " + str(distances))
         return distances
 
@@ -1525,7 +1528,7 @@ def get_dangerous_tunnels(field, others, bombs, dist, dist_enemies):
     for o in others:
         if dist[o] < 10:
             ex, ey = o
-            dist_enemy = dist_enemies[(ex, ey)]   # Use precomputed distance map for this enemy
+            dist_enemy = dist_enemies[(ex, ey)]  # Use precomputed distance map for this enemy
 
             for tunnel in tunnel_list:
                 tile_before_far_end = tunnel['tile_before_far_end']
@@ -1593,5 +1596,5 @@ Test our agent against others from github in 2 vs 2 and record avg scores
 
 LSTM cells, e.g. can remember spots where the bomb could destroy many crates
 
-Experiment: only rewards: coins 1, enemies 5 -> should learn to maximize score
+Experiment: only rewards: coins 1, enemies 5 -> should learn to ma ximize score
 """

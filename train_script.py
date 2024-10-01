@@ -1,4 +1,5 @@
 import subprocess
+import time
 
 train1 = [
     'python', 'main.py', 'play',
@@ -27,8 +28,13 @@ train3 = [
     '--no-gui'
 ]
 
+start = time.time()
 
 subprocess.run(train1)
 subprocess.run(train2)
 subprocess.run(train3)
+
+end = time.time()
+
+print("Training took " + str (end-start) + "seconds")
 # train it a little more using human

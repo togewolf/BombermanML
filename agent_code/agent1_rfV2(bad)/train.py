@@ -19,7 +19,7 @@ DID_NOT_FOLLOW_DIRECTION_SUGGESTION = 'DID_NOT_FOLLOW_DIRECTION_SUGGESTION'  # s
 DROPPED_BOMB_ON_TRAPPED_ENEMY = 'DROPPED_BOMB_ON_TRAPPED_ENEMY'
 DROPPED_BOMB_NEXT_TO_ENEMY = 'DROPPED_BOMB_NEXT_TO_ENEMY'
 WAITED_ON_A_BOMB = 'WAITED_ON_A_BOMB'
-ENEMY_GOT_KILL = 'ENEMY_GOT_KILL'  # todo
+ENEMY_GOT_KILL = 'ENEMY_GOT_KILL'
 WAITED_IN_EXPLOSION_ZONE = 'WAITED_IN_EXPLOSION_ZONE'
 IS_NEAR_BORDER = 'IS_NEAR_BORDER'
 MOVED_TOWARD_ENEMY_IN_DEAD_END = 'MOVED_TOWARD_ENEMY_IN_DEAD_END'
@@ -76,7 +76,7 @@ def game_events_occurred(self, old_game_state: dict, self_action: str, new_game_
     old_features = self.model.old_features
     new_features = self.model.new_features
 
-    crate_count = old_features[1]
+    """    crate_count = old_features[1]
 
     others = old_game_state['others']
     others = [t[3] for t in others]
@@ -114,9 +114,9 @@ def game_events_occurred(self, old_game_state: dict, self_action: str, new_game_
         events.append(WAITED_IN_EXPLOSION_ZONE)
 
     if new_features[3] == 1:
-        events.append(IS_REPEATING_ACTIONS)
+        events.append(IS_REPEATING_ACTIONS)"""
 
-    if followed_direction(old_features[4:8], self_action):
+    if followed_direction(old_features[0:4], self_action):
         events.append(FOLLOWED_DIRECTION_SUGGESTION)
     else:
         events.append(DID_NOT_FOLLOW_DIRECTION_SUGGESTION)
@@ -136,12 +136,12 @@ def game_events_occurred(self, old_game_state: dict, self_action: str, new_game_
     if self.model.enemy_got_kill:
         self.logger.info("Enemy got kill!")
         events.append(ENEMY_GOT_KILL)
-
+    """
     if any(old_features[52:56]):
         if followed_direction(old_features[52:56], self_action):
             events.append(MOVED_TOWARD_ENEMY_IN_DEAD_END)
         else:
-            events.append(IGNORED_ENEMY_IN_DEAD_END)
+            events.append(IGNORED_ENEMY_IN_DEAD_END)"""
 
     self.previous_action = self_action
 
@@ -213,7 +213,7 @@ def end_of_round(self, last_game_state: dict, last_action: str, events: List[str
         writer.writerow([survived])
 
     # Store the model
-    joblib.dump(self.model, 'model/model.pt')
+    joblib.dump(self.model, 'model/model.pkl')
 
 
 def reward_from_events(self, events: List[str]) -> int:

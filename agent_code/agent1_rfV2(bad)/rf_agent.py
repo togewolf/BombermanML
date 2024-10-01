@@ -1,83 +1,22 @@
-import torch
-import torch.nn as nn
-import torch.optim as optim
-import torch.optim.lr_scheduler as scheduler
+from sklearn.ensemble import RandomForestClassifier
 import numpy as np
-import torch.nn.functional as f
 from collections import deque
 import random
 from heapq import heapify, heappop, heappush
 
 
-class DeepQNetwork(nn.Module):
-    def __init__(self, lr, input_dims, l1_dims, l2_dims, l3_dims, l4_dims, l5_dims, dropout_rate=0.1):
-        super(DeepQNetwork, self).__init__()
-        # torch.autograd.set_detect_anomaly(True)  # For debugging
-        self.input_dims = input_dims
-        self.l1_dims = l1_dims
-        self.l2_dims = l2_dims
-        self.l3_dims = l3_dims
-        self.l4_dims = l4_dims
-        self.l5_dims = l5_dims
-
-        self.l1 = nn.Linear(self.input_dims, self.l1_dims)
-        self.dropout1 = nn.Dropout(p=dropout_rate)
-        self.l2 = nn.Linear(self.l1_dims, self.l2_dims)
-        self.dropout2 = nn.Dropout(p=dropout_rate)
-        self.l3 = nn.Linear(self.l2_dims, self.l3_dims)
-        self.dropout3 = nn.Dropout(p=dropout_rate)
-        self.l4 = nn.Linear(self.l3_dims, self.l4_dims)
-        self.dropout4 = nn.Dropout(p=dropout_rate)
-        self.l5 = nn.Linear(self.l4_dims, self.l5_dims)
-        self.dropout5 = nn.Dropout(p=dropout_rate)
-        self.lo = nn.Linear(self.l5_dims, 6)  # There are always six possible actions
-
-        # Optimizer (see https://pytorch.org/docs/stable/optim.html#algorithms)
-        self.optimizer = optim.Adam(self.parameters(), lr=lr)
-
-        # LR Scheduler (see https://pytorch.org/docs/stable/optim.html#how-to-adjust-learning-rate)
-        self.scheduler = scheduler.ExponentialLR(self.optimizer, gamma=0.99)
-        # self.scheduler = scheduler.ReduceLROnPlateau(self.optimizer, factor=0.1, patience=50)
-
-        self.loss = nn.MSELoss()
-        self.device = torch.device('cuda:0' if torch.cuda.is_available() else 'cpu')
-        if not torch.cuda.is_available():
-            print("GPU not found!")
-        self.to(self.device)
-
-    def forward(self, state, train):
-        x = f.relu(self.l1(state))
-        if train:
-            x = self.dropout1(x)
-        x = f.relu(self.l2(x))
-        if train:
-            x = self.dropout2(x)
-        x = f.relu(self.l3(x))
-        if train:
-            x = self.dropout3(x)
-        x = f.relu(self.l4(x))
-        if train:
-            x = self.dropout4(x)
-        x = f.relu(self.l5(x))
-        if train:
-            x = self.dropout5(x)
-        actions = self.lo(x)
-        return actions
-
-
 class Agent:
-    def __init__(self, logger, gamma, epsilon, lr, input_dims, batch_size, max_mem_size=100000, eps_end=0.03,
+    def __init__(self, logger, n_estimators=100, input_dims=60, batch_size=64, max_mem_size=100000, eps_end=0.03,
                  eps_dec=1e-2):
         self.logger = logger
-        self.gamma = gamma
-        self.epsilon = epsilon
+        self.epsilon = 1.0
         self.eps_min = eps_end
         self.eps_dec = eps_dec
-        self.lr = lr
-        self.mem_size = max_mem_size
         self.batch_size = batch_size
+        self.mem_size = max_mem_size
+        self.mem_cntr = 0
 
-        # feature-related
+        # Feature related
         self.old_features = None
         self.new_features = None
         self.total_coins = 0
@@ -87,19 +26,22 @@ class Agent:
         self.coordinate_history = deque([], maxlen=20)
         self.enemy_got_kill = False
 
-        # network dimensions
-        self.Q_eval = DeepQNetwork(self.lr, input_dims=input_dims, l1_dims=2 ** 9, l2_dims=2 ** 9,
-                                   l3_dims=2 ** 8, l4_dims=2 ** 7, l5_dims=2 ** 7)
-
+        # Memory buffers for training
         self.state_memory = np.zeros((self.mem_size, input_dims), dtype=np.float32)
         self.new_state_memory = np.zeros((self.mem_size, input_dims), dtype=np.float32)
         self.action_memory = np.zeros(self.mem_size, dtype=np.int32)
         self.reward_memory = np.zeros(self.mem_size, dtype=np.float32)
         self.terminal_memory = np.zeros(self.mem_size, dtype=bool)
 
+        # Random Forest model
+        self.rf_model = RandomForestClassifier(n_estimators=n_estimators)
+        self.input_dims = input_dims
         self.mem_cntr = 0
         self.iteration = 0
-        self.epoch = 0
+
+        # Initialize Random Forest training data buffer
+        self.X_train = []
+        self.y_train = []
 
     def store_transition(self, features, action, reward, state_, done):
         index = self.mem_cntr % self.mem_size
@@ -113,27 +55,30 @@ class Agent:
         self.terminal_memory[index] = done
         self.mem_cntr += 1
 
-    def choose_action(self, game_state, train):
-        if train:  # No need for old features when not training
+    def choose_action(self, game_state, train=True):
+        if train:
             if self.old_features is None:
                 self.old_features = state_to_features(self, game_state, self.logger)
-
             self.old_features = self.new_features
         self.new_features = state_to_features(self, game_state, self.logger)
-        disallowed = self.new_features[8:14]  # Result of function of immortality
+        disallowed = self.new_features[4:10]  # Function of immortality check
 
+        # Epsilon-greedy action selection
         if np.random.random() > self.epsilon or not train:
-            state = torch.tensor([self.new_features], dtype=torch.float32).to(self.Q_eval.device)
-            actions = self.Q_eval.forward(state, train).squeeze()
+            if len(self.X_train) > 0:
+                action = self.rf_model.predict([self.new_features])[0]
+            else:
+                action = random.randint(0, 5)
+            allowed_actions = [i for i in range(6) if disallowed[i] == 0]
 
-            for i in range(6):
-                if disallowed[i] == 1:
-                    actions[i] = -9999
-
-            action = torch.argmax(actions).item()
+            if action not in allowed_actions:
+                if len(allowed_actions) > 0:
+                    action = random.choice(allowed_actions)  # Choose a random allowed action
+                else:
+                    # If no actions are allowed (this shouldn't normally happen), default to 'WAIT' (action 4)
+                    action = 4
         else:
             p = [.20, .20, .20, .20, .10, .10]
-
             for i in range(6):
                 if disallowed[i] == 1:
                     p[i] = 0
@@ -146,51 +91,35 @@ class Agent:
 
             action = random.choices(range(6), weights=p, k=1)[0]
 
-        # self.logger.info("Eps = " + str(self.epsilon) + ")")
+        # Track the agent's history
         self.last_actions_deque.append(action)
         _, _, _, (ax, ay) = game_state['self']
         self.coordinate_history.append((ax, ay))
         return action
 
-    def learn(self, end_epoch=False):
+    def learn(self):
+        # Skip learning if we don't have enough data to train a batch
         if self.mem_cntr < self.batch_size:
             return
 
-        self.Q_eval.optimizer.zero_grad()
-
+        # Collect experience for Random Forest training
         max_mem = min(self.mem_cntr, self.mem_size)
         batch = np.random.choice(max_mem, self.batch_size, replace=False)
 
-        batch_index = np.arange(self.batch_size, dtype=np.int32)
-
-        state_batch = torch.tensor(self.state_memory[batch]).to(self.Q_eval.device)
-        new_state_batch = torch.tensor(self.new_state_memory[batch]).to(self.Q_eval.device)
-        reward_batch = torch.tensor(self.reward_memory[batch]).to(self.Q_eval.device)
-        terminal_batch = torch.tensor(self.terminal_memory[batch]).to(self.Q_eval.device)
-
+        state_batch = self.state_memory[batch]
         action_batch = self.action_memory[batch]
 
-        q_eval = self.Q_eval.forward(state_batch, 1)[batch_index, action_batch]
-        q_next = self.Q_eval.forward(new_state_batch, 1)
-        q_next[terminal_batch] = 0.0
+        self.X_train.extend(state_batch)
+        self.y_train.extend(action_batch)
 
-        q_target = reward_batch + self.gamma * torch.max(q_next, dim=1)[0]
+        # Train the Random Forest model if we have sufficient training data
+        if len(self.X_train) >= self.batch_size:
+            self.rf_model.fit(self.X_train, self.y_train)
+            self.X_train = []
+            self.y_train = []
 
-        loss = self.Q_eval.loss(q_target, q_eval).to(self.Q_eval.device)
-
-        loss.backward()
-
-        self.Q_eval.optimizer.step()
-
-        self.iteration += 1
-        if end_epoch:
-            self.epoch += 1
-
-            # self.Q_eval.scheduler.step()
-            self.epsilon = self.epsilon - self.eps_dec if self.epsilon > self.eps_min else self.eps_min
-
-        # self.logger.info("LR = " + str(self.Q_eval.scheduler.get_last_lr()))
-
+        # Update epsilon for exploration-exploitation trade-off
+        self.epsilon = self.epsilon - self.eps_dec if self.epsilon > self.eps_min else self.eps_min
 
 # Direction Mapping: invert direction by multiplying with -1
 dUP = -2
@@ -277,22 +206,22 @@ def state_to_features(self, game_state: dict, logger) -> np.array:
                                       dist, grad, direction_to_enemy_in_dead_end, collected_coins_all, logger)
 
     # Features
-    features.append(int(bomb_available))  # feat 0
-    features.append(get_number_of_crates_in_bomb_radius(ax, ay, field))  # feat 1
-    features.append(in_danger)  # feat 2
-    features.append(is_repeating_actions(self))  # feat 3
+    #features.append(int(bomb_available))  # feat 0
+    #features.append(get_number_of_crates_in_bomb_radius(ax, ay, field))  # feat 1
+    #features.append(in_danger)  # feat 2
+    #features.append(is_repeating_actions(self))  # feat 3
     features.extend(suggestion)  # feat 4-7
     features.extend(blocked)  # 8-13
-    features.extend(enemies_distances_and_directions)  # 14-25
-    features.append(is_at_crossing(ax, ay))  # 26
-    features.append(direction_to_enemy_in_dead_end[4])  # 27 Whether it can bomb trap the enemy
-    features.append(int(is_next_to_enemy(ax, ay, others)))  # 28
-    features.extend(get_neighboring_explosions_or_coins(ax, ay, danger_map, coins))  # 29-33
-    features.extend(get_nearest_coin_dist(dist, coins, grad))  # 34-37
-    features.extend(get_enemies_relative_positions(ax, ay, others))  # 38-49
-    features.extend([0.1 * ax, 0.1 * ay])  # 50-51  Idea: learn to avoid dwelling at the borders and the corners
-    features.extend(direction_to_enemy_in_dead_end[:4])  # 52-55
-    features.extend(get_second_nearest_coin_dist(dist, coins, grad))  # 56-60
+    #features.extend(enemies_distances_and_directions)  # 14-25
+    #features.append(is_at_crossing(ax, ay))  # 26
+    #features.append(direction_to_enemy_in_dead_end[4])  # 27 Whether it can bomb trap the enemy
+    #features.append(int(is_next_to_enemy(ax, ay, others)))  # 28
+    #features.extend(get_neighboring_explosions_or_coins(ax, ay, danger_map, coins))  # 29-33
+    #features.extend(get_nearest_coin_dist(dist, coins, grad))  # 34-37
+    #features.extend(get_enemies_relative_positions(ax, ay, others))  # 38-49
+    #features.extend([0.1 * ax, 0.1 * ay])  # 50-51  Idea: learn to avoid dwelling at the borders and the corners
+    #features.extend(direction_to_enemy_in_dead_end[:4])  # 52-55
+    #features.extend(get_second_nearest_coin_dist(dist, coins, grad))  # 56-60
     # relative bomb positions?
 
     return features

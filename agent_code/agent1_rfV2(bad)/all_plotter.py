@@ -5,7 +5,7 @@ data = pd.read_csv('model/training_metrics.csv')
 
 print("Columns in CSV:", data.columns)
 
-epochs = data['Epoch']
+epochs = data['Round']
 scores = data['Score']
 survivals = data['Survived']
 cumulative_rewards = data['CumulativeReward']

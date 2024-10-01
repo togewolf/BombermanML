@@ -1299,7 +1299,7 @@ def do_not_the_dead_end(ax, ay, dead_end_list, others, dist, grad, field, bombs)
 
     # If the agent cannot reach the exit in time
     if distance_to_exit + 1 >= distance_to_exit_enemy:
-        # Use the direction_to_object to find the direction toward the exit
+        # Use the get_direction_to_object to find the direction toward the exit
         direction = direction_to_object(current_dead_end['tile_before_open_end'], grad)
 
         # Convert direction to one-hot vector of blocked directions

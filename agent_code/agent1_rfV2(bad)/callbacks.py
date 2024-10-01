@@ -1,8 +1,7 @@
 import os
-import pickle
-from .dqlnn_model import Agent
-
-ACTIONS = ['RIGHT', 'DOWN', 'LEFT', 'UP', 'WAIT', 'BOMB']
+from .rf_agent import Agent
+from .utils import Action
+import joblib
 
 
 def setup(self):
@@ -19,20 +18,27 @@ def setup(self):
 
     :param self: This object is passed to all callbacks, and you can set arbitrary values.
     """
-    # load specific snapshot of model; if set to zero, the default (model/model.pt) will be loaded
-    # note that training from a snapshot n will save new snapshots as n+10, n+20 etc., thus overriding some of the previous snapshots
+    # Load specific snapshot of model; if set to zero, the default (model/model.pt) will be loaded
+    # Note that training from a snapshot n will save new snapshots as n+10, n+20 etc., thus overriding some previous snapshots
     self.start_from_snapshot = 0
+    self.round_count = 0
 
-    model_filename = 'model/model.pt' if self.start_from_snapshot == 0 else 'model/snapshots/model-' + str(self.start_from_snapshot) + '.pt'
+    # Metrics
+    self.cumulative_reward = 0
+    self.very_bad_agent = 0.0
+    self.kills = 0
+    self.opponents_eliminated = 0
+
+    model_filename = 'model/model_rf.pkl' if self.start_from_snapshot == 0 else 'model/snapshots/model-' + str(self.start_from_snapshot) + '.pkl'
 
     if not os.path.isfile(model_filename):
         self.logger.info("Setting up model from scratch.")
-        self.model = Agent(self.logger, gamma=0.9, epsilon=1.0, lr=1e-4, input_dims=469, batch_size=64)
+        self.model = Agent(self.logger, n_estimators=30, input_dims=10, batch_size=64)
 
     else:
         self.logger.info("Loading model from saved state.")
-        with open(model_filename, 'rb') as file:
-            self.model = pickle.load(file)
+        self.model = joblib.load(model_filename)
+        self.model.logger = self.logger
 
 
 def act(self, game_state: dict) -> str:
@@ -45,5 +51,6 @@ def act(self, game_state: dict) -> str:
     :return: The action to take as a string.
     """
     action = self.model.choose_action(game_state, self.train)
-    self.logger.info("Action: " + ACTIONS[action])
-    return ACTIONS[action]
+    action_string = Action.to_str(action)
+    self.logger.info("Action: " + action_string)
+    return action_string
