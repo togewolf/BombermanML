@@ -1,7 +1,12 @@
 # Bomberman reinforcement learning project
 
-Our report: report.pdf
-Our final agent: agent_code/Crow_of_Reinforcement
+## Our report: 
+
+See report.pdf
+
+## Our final agent:
+
+agent_code/Crow_of_Reinforcement
 
 
 
@@ -20,6 +25,3 @@ Thus began the era of carefully optimizing features, architecture, and training 
 occasionally, agents were saved for testing purposes and to check whether changes did indeed enhance the agent:
 `agent2_qlnnV2_old_1` up to `agent2_qlnnV2_old_5`. Our efforts culminated in the renaming of the latest `agent2_qlnnV2` 
 agent, which shall henceforth be known as the almighty "`Crow of Reinforcement`", which we then submitted for the competition.
-But we were, all of us, deceived, for another path was saved: torch.save(...) stored the path to the Python files in the original
-folder after the renaming, causing an error when this folder is not present, which we, despite testing it in docker,
-did not notice until the results of the second test upload, which we received after the final submission deadline.
