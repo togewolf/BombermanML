@@ -1112,13 +1112,3 @@ def is_next_to_enemy(ax, ay, enemies, d=1):
             return True
 
     return False
-
-# todo today: achieve immortality
-#  - sometimes runs into enemy explosions while fleeing from its own explosion - flaw in disallowed_actions
-#  - can get trapped between two bombs/surrounded by other agents - add function/features that prevents this
-#  - make disallowed_actions the "function of absolute immortality" - the agent should not be able to die at all
-#  - the agent does not seem motivated to move toward and blow up crates in the end
-#  - experiment: add many layers and see what happens
-#  - check whether all rewards always work as they are supposed to and do not somehow cause the agent to learn
-#    unwanted stuff such as the oscillation behavior
-#  - Why exactly does performance decrease after some amount of training steps? Why the periodic ups and downs?

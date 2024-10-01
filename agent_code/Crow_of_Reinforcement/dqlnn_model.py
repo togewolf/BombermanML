@@ -1549,11 +1549,3 @@ def get_dangerous_tunnels(field, others, bombs, dist, dist_enemies):
     # Return only the full tunnels that can be blocked
     return blocked_tunnels, blocked_tunnel_map
 
-
-def neighboring_tile_conflict(ax, ay, others):
-    # todo
-    """
-    Our agent often gets stuck between two others, even though it correctly attempted to escape, but ran into
-    a neighboring tile at the same time as an enemy and got blocked. To prevent this, this feature shows whether
-    a neighboring tile can be blocked by an enemy.
-    """
