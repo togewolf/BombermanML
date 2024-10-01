@@ -2,7 +2,7 @@ from copy import deepcopy
 import torch
 from typing import List
 import os
-import csv  # to store scores
+import csv  # to store metrics
 
 import events as e
 from .dqlnn_model import state_to_features

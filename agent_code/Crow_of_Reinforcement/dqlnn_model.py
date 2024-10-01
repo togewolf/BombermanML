@@ -1551,26 +1551,9 @@ def get_dangerous_tunnels(field, others, bombs, dist, dist_enemies):
 
 
 def neighboring_tile_conflict(ax, ay, others):
+    # todo
     """
     Our agent often gets stuck between two others, even though it correctly attempted to escape, but ran into
     a neighboring tile at the same time as an enemy and got blocked. To prevent this, this feature shows whether
     a neighboring tile can be blocked by an enemy.
     """
-
-
-# todo:
-"""
-- After step 250, if cannot kill current opponent after 7 bombs, change current goal to other opponent
-- increase agent kill rate, make it more aggressive somehow -> train against worse agents?
-- prioritizing attacking 'weak' enemies - there will be teams with bad implementations we could farm points off of
-    example: agent does not move -> keep location history of other agents and move toward "braindead" agents
-
-
-
-
-Why exactly does performance decrease after some amount of training steps? Why the periodic ups and downs?
-
-LSTM cells, e.g. can remember spots where the bomb could destroy many crates
-
-Experiment: only rewards: coins 1, enemies 5 -> should learn to maximize score
-"""
