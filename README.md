@@ -1,9 +1,5 @@
 # Bomberman reinforcement learning project
 
-## Our report: 
-
-See report.pdf
-
 ## Our final agent:
 
 agent_code/Crow_of_Reinforcement
